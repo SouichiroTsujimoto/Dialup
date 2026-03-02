@@ -1,37 +1,36 @@
 defmodule Dialup.Page do
-  @moduledoc """
-  Dialup ページモジュールの基底マクロ。
-
-  ## 使い方
-
-      defmodule Dialup.App.Root do
-        use Dialup.Page
-
-        def render(assigns) do
-          ~H\"\"\"
-          <div>Hello, {@name}!</div>
-          \"\"\"
-        end
-      end
-
-  ## 提供されるもの
-
-  - `~H` シジル（HEEx テンプレート・自動エスケープ）
-  - `raw/1`（信頼済みHTMLをエスケープなしで出力）
-  - `mount/1` と `handle_event/3` のデフォルト実装（オーバーライド可能）
-  """
+  @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t() | binary()
+  @callback mount(assigns :: map()) :: {:ok, map()}
+  # 再描画なし（状態のみ更新）
+  @callback handle_event(event :: binary(), value :: any(), assigns :: map()) ::
+              {:noreply, map()}
+              # 全体再描画
+              | {:update, map()}
+              # 部分re-render（target: DOM要素のid、rendered: ~H または binary）
+              | {:patch, target :: binary(), rendered :: any(), map()}
 
   defmacro __using__(_opts) do
     quote do
+      @behaviour Dialup.Page
+
       import Phoenix.Component
       import Phoenix.HTML, only: [raw: 1]
 
-      # デフォルト実装（定義しなくても動く）
       def mount(assigns), do: {:ok, assigns}
       def handle_event(_event, _value, assigns), do: {:noreply, assigns}
 
-      # ページ側でオーバーライドできる
       defoverridable mount: 1, handle_event: 3
+
+      @before_compile Dialup.Page
+    end
+  end
+
+  defmacro __before_compile__(env) do
+    unless Module.defines?(env.module, {:render, 1}) do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description: "module #{inspect(env.module)} using Dialup.Page must define render/1"
     end
   end
 end

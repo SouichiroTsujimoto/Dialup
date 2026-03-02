@@ -18,7 +18,8 @@ defmodule Dialup.UserSessionProcess do
   # 初回接続：クライアントが現在のパスを通知してくる
   @impl GenServer
   def handle_cast({:init, path}, state) do
-    {:noreply, %{state | path: path}}
+    new_assigns = mount(path, state.assigns)
+    {:noreply, %{state | path: path, assigns: new_assigns}}
   end
 
   # イベント処理：現在のページモジュールの handle_event/3 に委譲する
@@ -30,13 +31,18 @@ defmodule Dialup.UserSessionProcess do
 
       page_module ->
         case page_module.handle_event(event, value, state.assigns) do
-          # 全体再描画
+          # stateのみ更新
           {:noreply, new_assigns} ->
+            {:noreply, %{state | assigns: new_assigns}}
+
+          # 全体再描画
+          {:update, new_assigns} ->
             new_state = update_page(%{state | assigns: new_assigns})
             {:noreply, new_state}
 
           # 部分morph
-          {:patch, target, html, new_assigns} ->
+          {:patch, target, rendered, new_assigns} ->
+            html = to_html(rendered)
             payload = Jason.encode!(%{target: target, html: html})
             send(state.socket_pid, {:send_html, payload})
             {:noreply, %{state | assigns: new_assigns}}
@@ -82,6 +88,14 @@ defmodule Dialup.UserSessionProcess do
       {:ok, html} -> html
       {:error, :not_found} -> "<h1>404 Not Found</h1>"
     end
+  end
+
+  defp to_html(rendered) when is_binary(rendered), do: rendered
+
+  defp to_html(rendered) do
+    rendered
+    |> Phoenix.HTML.Safe.to_iodata()
+    |> IO.iodata_to_binary()
   end
 
   defp update_page(state) do

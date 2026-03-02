@@ -1,33 +1,23 @@
 defmodule Dialup.Layout do
-  @moduledoc """
-  Dialup レイアウトモジュールの基底マクロ。
-
-  ## 使い方
-
-      defmodule Dialup.App.Layout do
-        use Dialup.Layout
-
-        def render(assigns) do
-          ~H\"\"\"
-          <div>
-            <nav>...</nav>
-            <main>{raw(assigns[:inner_content])}</main>
-          </div>
-          \"\"\"
-        end
-      end
-
-  ## inner_content について
-
-  `assigns[:inner_content]` には子ページまたは子レイアウトが
-  レンダリングした HTML 文字列が入る。
-  サーバー生成の信頼済み HTML なので `raw/1` で展開する。
-  """
+  @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t() | binary()
 
   defmacro __using__(_opts) do
     quote do
+      @behaviour Dialup.Layout
+
       import Phoenix.Component
       import Phoenix.HTML, only: [raw: 1]
+
+      @before_compile Dialup.Layout
+    end
+  end
+
+  defmacro __before_compile__(env) do
+    unless Module.defines?(env.module, {:render, 1}) do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description: "module #{inspect(env.module)} using Dialup.Layout must define render/1"
     end
   end
 end

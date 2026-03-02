@@ -2,7 +2,6 @@ defmodule Dialup.App.Layout do
   use Dialup.Layout
 
   def render(assigns) do
-    # inner は生のHTML文字列なので raw() で渡す
     ~H"""
     <div id="app-layout">
       <header>

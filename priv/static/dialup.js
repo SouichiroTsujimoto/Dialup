@@ -27,6 +27,7 @@ const Dialup = (() => {
         const root = document.getElementById("dialup-root");
         if (!root) return;
 
+        // ws-event, ws-href: クリックイベント
         root.addEventListener("click", (e) => {
             // ws-href
             const linkEl = e.target.closest("[ws-href]");
@@ -43,6 +44,26 @@ const Dialup = (() => {
                 const event = eventEl.getAttribute("ws-event");
                 const value = eventEl.getAttribute("ws-value") ?? "";
                 send(event, value);
+            }
+        });
+
+        // ws-submit: フォーム送信（全フィールドをオブジェクトとして送信）
+        root.addEventListener("submit", (e) => {
+            const formEl = e.target.closest("[ws-submit]");
+            if (formEl) {
+                e.preventDefault();
+                const event = formEl.getAttribute("ws-submit");
+                const value = Object.fromEntries(new FormData(formEl));
+                send(event, value);
+            }
+        });
+
+        // ws-change: 入力のたびにイベント送信（リアルタイムバリデーション等）
+        root.addEventListener("input", (e) => {
+            const inputEl = e.target.closest("[ws-change]");
+            if (inputEl) {
+                const event = inputEl.getAttribute("ws-change");
+                send(event, e.target.value);
             }
         });
     }
