@@ -68,7 +68,9 @@ end
 
 ## ドキュメント
 
-詳細なガイドは以下を参照してください：
+詳細なガイドは`mix docs --open`で参照してください
+
+ガイドのドキュメント本体は`guides/`にあります
 
 - [Getting Started](./guides/getting-started.md) - インストールと基本的な使い方
 - [Routing](./guides/routing.md) - ルーティングの詳細
@@ -77,6 +79,7 @@ end
 - [Events](./guides/events.md) - イベント処理
 - [Helpers](./guides/helpers.md) - ヘルパー関数
 - [Deployment](./guides/deployment.md) - デプロイ方法
+- [Fullstack Example](./guides/fullstack-example.md) - Ecto, Pubsubも用いた実践的なアプリケーション例
 
 ## アーキテクチャ
 
