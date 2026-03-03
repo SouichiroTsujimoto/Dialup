@@ -7,7 +7,30 @@ defmodule Dialup.MixProject do
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+
+      # ドキュメント生成設定
+      name: "Dialup",
+      description: "WebSocket-first, file-based routing Elixir framework",
+      source_url: "https://github.com/SouichiroTsujimoto/Dialup",
+      homepage_url: "https://github.com/SouichiroTsujimoto/Dialup",
+      docs: [
+        main: "readme",
+        extras: [
+          "README.md",
+          "guides/getting-started.md",
+          "guides/routing.md",
+          "guides/state-management.md",
+          "guides/lifecycle.md",
+          "guides/events.md",
+          "guides/helpers.md",
+          "guides/deployment.md"
+        ],
+        groups_for_extras: [
+          Guides: ~w(guides/getting-started.md guides/routing.md guides/state-management.md 
+                     guides/lifecycle.md guides/events.md guides/helpers.md guides/deployment.md)
+        ]
+      ]
     ]
   end
 
@@ -26,7 +49,10 @@ defmodule Dialup.MixProject do
       {:websock_adapter, "~> 0.5"},
       {:jason, "~> 1.4"},
       {:plug, "~> 1.16"},
-      {:phoenix_live_view, "~> 1.0"}
+      {:phoenix_live_view, "~> 1.0"},
+
+      # 開発依存
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
 end
