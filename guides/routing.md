@@ -1,71 +1,117 @@
 # Routing
 
-Dialupのファイルベースルーティングシステムについて。
+ファイルベースルーティングの仕様と使い方。
 
-## 概要
+## 基本概念
 
-### ファイル配置がそのままルートになる
+ファイルの配置がそのままURLパスになる。ルーター設定は不要。
 
-（基本概念の説明）
+```
+lib/app/page.ex              → /
+lib/app/about/page.ex        → /about
+lib/app/users/page.ex        → /users
+lib/app/users/[id]/page.ex   → /users/:id
+```
 
 ## 静的ルーティング
 
-### 基本的なファイル配置
+### 基本的な対応
 
-（ディレクトリ構造とURLの対応）
+| ファイルパス | URL |
+|-------------|-----|
+| `app/page.ex` | `/` |
+| `app/about/page.ex` | `/about` |
+| `app/docs/guide/page.ex` | `/docs/guide` |
 
 ### インデックスページ
 
-（page.exの配置と/への対応）
+ディレクトリ配下の `page.ex` が該当パスを担当する。
 
-### ネストしたルート
-
-（親子関係のディレクトリ構造）
+```
+app/users/page.ex    → /users（ユーザー一覧）
+app/users/[id]/page.ex → /users/123（ユーザー詳細）
+```
 
 ## 動的ルーティング
 
 ### ブラケット記法
 
-（[id]形式の説明）
+`[パラメータ名]` でURLパラメータを受け取る。
 
-### パラメータへのアクセス
+```
+app/users/[id]/page.ex    → /users/123, /users/abc など
+app/posts/[slug]/page.ex  → /posts/hello-world など
+```
 
-（mount/2のparams引数）
+### paramsへのアクセス
 
-### パターンマッチによる分岐
+`mount/2` の第1引数で受け取る：
 
-（異なるパラメータ値での振り分け）
+```elixir
+defmodule MyApp.Users.Id do
+  use Dialup.Page
 
-## レイアウトとの関係
+  def mount(params, assigns) do
+    id = params["id"]        # "123"
+    user = Users.get!(id)
+    {:ok, assigns |> overwrite(%{user: user})}
+  end
+end
+```
 
-### レイアウトの継承
+### パターンマッチ
 
-（親ディレクトリのlayout.ex適用）
+異なるパラメータ値で分岐できる：
 
-### ルートごとのレイアウト切り替え
+```elixir
+# /users/new → 新規作成画面
+def mount(%{"id" => "new"}, assigns) do
+  {:ok, assigns |> overwrite(%{mode: :new, user: nil})}
+end
 
-（特定パスでのレイアウト変更）
+# /users/:id → 編集画面
+def mount(%{"id" => id}, assigns) do
+  user = Users.get!(id)
+  {:ok, assigns |> overwrite(%{mode: :edit, user: user})}
+end
+```
+
+## レイアウトの継承
+
+### レイアウトファイルの配置
+
+```
+app/layout.ex              # 全ページの共通レイアウト
+app/users/layout.ex        # /users 以下のレイアウト
+app/users/[id]/layout.ex   # /users/:id 以下のレイアウト（あれば）
+```
+
+### レイアウトの適用ルール
+
+URL `/users/123/profile` の場合：
+
+1. `app/layout.ex`（最上位）
+2. `app/users/layout.ex`（中間）
+3. `app/users/[id]/page.ex` または `app/users/profile/page.ex`（該当ページ）
+
+レイアウトは上から順にネストされる。
 
 ## ルーティングの優先順位
 
-### 静的 vs 動的
+1. **静的ルートを先に探索**（完全一致）
+2. **動的ルートにフォールバック**（パターンマッチ）
+3. **マッチしない場合は404**
 
-（どちらが優先されるか）
+```
+app/users/new/page.ex      → 静的: /users/new
+app/users/[id]/page.ex     → 動的: /users/:id
 
-### フォールバックの仕組み
+/users/new      → 静的ルートが優先
+te/users/123     → 動的ルートがマッチ
+```
 
-（マッチング失敗時の動作）
+## 制限事項
 
-## ベストプラクティス
-
-### URL設計の指針
-
-（推奨されるパス構造）
-
-### 共通の注意点
-
-（ pitfalls と対処法）
-
----
-
-*関連ガイド: [Getting Started](./getting-started.md), [Lifecycle](./lifecycle.md)*
+- 正規表現やカスタムパターンマッチは不可
+- `[id]` はURL全体のセグメントにマッチ（`/` を含まない）
+- オプショナルパラメータは不可（`/users` と `/users/:id` は別ファイルが必要）

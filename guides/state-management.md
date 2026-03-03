@@ -1,71 +1,111 @@
 # State Management
 
-Dialupにおける状態（assigns）の管理方法。
+assignsによる状態管理の方法。
 
-## 概要
+## Assignsとは
 
-### assignsとは
+ページとレイアウトが保持する状態。マップ（キー・値）として表現される。
 
-（基本概念の説明）
+```elixir
+%{
+  # フレームワークが設定
+  params: %{"id" => "123"},
+  inner_content: "...",
+  
+  # ユーザーが設定
+  count: 0,
+  user: %User{...},
+  errors: []
+}
+```
 
-### サーバーサイド状態の特徴
+## 標準的なキー
 
-（HTTPセッションとは異なる点）
+| キー | 設定元 | 説明 |
+|-----|-------|------|
+| `params` | Dialup | URLパラメータ |
+| `inner_content` | Dialup | レイアウト内で子要素を表示する際に使用 |
 
-## assignsの構造
+## 状態の更新
 
-### 標準的なキー
+### 初期化（mount）
 
-（params, inner_contentなど）
+```elixir
+def mount(params, assigns) do
+  assigns
+  |> set_default(%{count: 0, items: []})    # デフォルト値を設定
+  |> overwrite(%{loaded: true})             # 特定の値で上書き
+end
+```
 
-### カスタムデータの保持
+### イベント処理（handle_event）
 
-（ユーザー定義のキー）
+```elixir
+def handle_event("add", %{"name" => name}, assigns) do
+  new_item = %{id: System.unique_integer(), name: name}
+  items = [new_item | assigns.items]
+  
+  {:update, assigns |> overwrite(%{items: items})}
+end
+```
 
 ## 状態のライフサイクル
 
-### ページ遷移時の状態
+### 生存期間
 
-（共通プレフィックスの保持）
+- **セッション単位**: WebSocket接続中は維持
+- **URL接頭辞単位**: 共通パス部分は維持、異なる部分は破棄
 
-### レイヤーごとの独立性
+```
+/users/123 → /users/123/edit
+→ usersレイヤーのstateは維持
 
-（各layout/pageのstate分離）
+/users/123 → /items/456  
+→ usersレイヤーのstateは破棄、itemsレイヤーが新規作成
+```
 
-## 状態の更新方法
+### 揮発性
 
-### mount時の初期化
+assignsはメモリ上に保持される。以下の場合に失われる：
 
-（set_defaultの使い方）
+- WebSocket切断後、タイムアウト時間経過
+- サーバー再起動
+- プロセスクラッシュ
 
-### イベントでの更新
+永続化が必要なデータはDBなどに保存すること。
 
-（overwriteの使い方）
+## 状態設計の指針
 
-### 部分更新 vs 全体更新
+### assignsに含めるべきもの
 
-（:patchと:updateの使い分け）
+- UIの表示状態（count, loading, errors）
+- 現在表示中のデータ（user, items）
+- フォーム入力中の値（draft）
 
-## 永続化の考慮
+### assignsに含めないべきもの
 
-### volatileな状態
+- 永続化済みデータの全件（ページネーション対象）
+- セキュリティ上敏感な情報（パスワード、トークン）
+- 大きなバイナリデータ
 
-（プロセス終了で失われる）
+## パターンマッチの活用
 
-### DBへの永続化
+mount内でassignsの構造を検証：
 
-（必要なデータの保存）
+```elixir
+def mount(_params, %{current_user: nil} = assigns) do
+  # 未ログイン時の処理
+  {:ok, assigns |> overwrite(%{require_login: true})}
+end
 
-## ベストプラクティス
+def mount(_params, %{current_user: user} = assigns) do
+  # ログイン済み時の処理
+  {:ok, assigns |> overwrite(%{profile: user.profile})}
+end
+```
 
-### 状態の粒度
+## 注意点
 
-（何をassignsに含めるか）
-
-### メモリ使用量の考慮
-
-（大きなデータの扱い）
-
----
-
-*関連ガイド: [Lifecycle](./lifecycle.md), [Events](./events.md)*
+- assignsは書き換え可能だが、immutabilityを保つ
+- 大きなリストはpage単位で保持し、無限スクロールなどを検討
+- メモリ使用量に注意（各タブ/ユーザーにプロセスが割り当てられる）
