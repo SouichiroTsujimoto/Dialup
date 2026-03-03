@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="{@lang}">
+<head>
+  <meta charset="UTF-8">
+  <title>{@title}</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    #ws-status { font-size: 0.8rem; color: gray; }
+    [ws-href] {
+      color: #0066cc;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+    [ws-href]:hover {
+      color: #b600daff;
+    }
+  </style>
+  {raw(@head_extra)}
+</head>
+<body>
+  <div id="dialup-root">
+    {raw(@inner_content)}
+  </div>
+  <script src="/idiomorph.js"></script>
+  <script src="/dialup.js"></script>
+  <script>Dialup.connect();</script>
+</body>
+</html>

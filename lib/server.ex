@@ -5,23 +5,47 @@ defmodule Dialup.Server do
   plug(:match)
   plug(:dispatch)
 
+  def init(opts), do: opts
+
+  def call(conn, opts) do
+    app_module = Keyword.fetch!(opts, :app)
+
+    conn
+    |> Plug.Conn.put_private(:dialup_app, app_module)
+    |> super(opts)
+  end
+
   # WebSocket upgrade endpoint
   get "/ws" do
+    app_module = conn.private[:dialup_app]
+
     conn
-    |> WebSockAdapter.upgrade(Dialup.WebSocket, [], timeout: :infinity)
+    |> WebSockAdapter.upgrade(Dialup.WebSocket, %{app_module: app_module}, timeout: :infinity)
     |> halt()
   end
 
   get _ do
     path = conn.request_path
+    app_module = conn.private[:dialup_app]
 
     initial_html =
-      case Dialup.Router.dispatch(path, %{}) do
-        {:ok, html} -> html
-        {:error, :not_found} -> "<h1>404 Not Found</h1>"
+      case app_module.page_for(path) do
+        nil ->
+          "<h1>404 Not Found</h1>"
+
+        page_module ->
+          {:ok, assigns} = page_module.mount(%{})
+
+          case app_module.dispatch(path, assigns) do
+            {:ok, html} -> html
+            {:error, :not_found} -> "<h1>404 Not Found</h1>"
+          end
       end
 
-    shell = shell_html(path, initial_html)
+    shell =
+      app_module.__shell_opts__()
+      |> Map.merge(%{inner_content: initial_html})
+      |> Dialup.Shell.render()
 
     conn
     |> put_resp_content_type("text/html")
@@ -30,39 +54,5 @@ defmodule Dialup.Server do
 
   match _ do
     send_resp(conn, 404, "Not Found")
-  end
-
-  defp shell_html(path, initial_html) do
-    """
-    <!DOCTYPE html>
-    <html lang="ja">
-    <head>
-      <meta charset="UTF-8">
-      <title>Dialup</title>
-      <script src="https://unpkg.com/idiomorph@0.7.4"></script>
-      <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-        #ws-status { font-size: 0.8rem; color: gray; }
-        [ws-href] {
-          color: #0066cc;
-          text-decoration: underline;
-          cursor: pointer;
-        }
-        [ws-href]:hover {
-          color: #b600daff;
-        }
-      </style>
-    </head>
-    <body>
-      <p id="ws-status">接続中...</p>
-      <div id="dialup-root">#{initial_html}</div>
-
-      <script src="/dialup.js"></script>
-      <script>
-        Dialup.connect("#{path}");
-      </script>
-    </body>
-    </html>
-    """
   end
 end

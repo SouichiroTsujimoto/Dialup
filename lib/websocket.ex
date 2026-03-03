@@ -3,8 +3,8 @@ defmodule Dialup.WebSocket do
 
   # WebSocket接続確立時、GenServerを起動してPIDをstateに保存
   @impl WebSock
-  def init(_opts) do
-    {:ok, session_pid} = Dialup.UserSessionProcess.start_link(self())
+  def init(%{app_module: app_module}) do
+    {:ok, session_pid} = Dialup.UserSessionProcess.start_link(self(), app_module)
     {:ok, %{session_pid: session_pid}}
   end
 

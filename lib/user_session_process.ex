@@ -1,8 +1,8 @@
 defmodule Dialup.UserSessionProcess do
   use GenServer
 
-  def start_link(socket_pid) do
-    GenServer.start_link(__MODULE__, %{socket_pid: socket_pid})
+  def start_link(socket_pid, app_module) do
+    GenServer.start_link(__MODULE__, %{socket_pid: socket_pid, app_module: app_module})
   end
 
   def init_session(pid, path), do: GenServer.cast(pid, {:init, path})
@@ -10,22 +10,22 @@ defmodule Dialup.UserSessionProcess do
   def event(pid, event, value), do: GenServer.cast(pid, {:event, event, value})
 
   @impl GenServer
-  def init(%{socket_pid: socket_pid}) do
+  def init(%{socket_pid: socket_pid, app_module: app_module}) do
     Process.monitor(socket_pid)
-    {:ok, %{path: nil, socket_pid: socket_pid, assigns: %{}}}
+    {:ok, %{path: nil, socket_pid: socket_pid, app_module: app_module, assigns: %{}}}
   end
 
   # 初回接続：クライアントが現在のパスを通知してくる
   @impl GenServer
   def handle_cast({:init, path}, state) do
-    new_assigns = mount(path, state.assigns)
+    new_assigns = mount(path, state)
     {:noreply, %{state | path: path, assigns: new_assigns}}
   end
 
   # イベント処理：現在のページモジュールの handle_event/3 に委譲する
   @impl GenServer
   def handle_cast({:event, event, value}, state) do
-    case Dialup.Router.page_for(state.path) do
+    case state.app_module.page_for(state.path) do
       nil ->
         {:noreply, state}
 
@@ -53,7 +53,7 @@ defmodule Dialup.UserSessionProcess do
   # ページ遷移：新しいページのmount/1を呼ぶ
   @impl GenServer
   def handle_cast({:navigate, path}, state) do
-    new_assigns = mount(path, state.assigns)
+    new_assigns = mount(path, state)
     new_state = update_page(%{state | path: path, assigns: new_assigns})
     {:noreply, new_state}
   end
@@ -66,25 +66,19 @@ defmodule Dialup.UserSessionProcess do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # ページのmount/1を呼んで初期assignsを取得する
-  defp mount(path, assigns) do
-    case Dialup.Router.page_for(path) do
+  defp mount(path, state) do
+    case state.app_module.page_for(path) do
       nil ->
-        assigns
+        state.assigns
 
       page_module ->
-        if function_exported?(page_module, :mount, 1) do
-          case page_module.mount(assigns) do
-            {:ok, new_assigns} -> new_assigns
-          end
-        else
-          assigns
-        end
+        {:ok, new_assigns} = page_module.mount(state.assigns)
+        new_assigns
     end
   end
 
-  defp render(path, assigns) do
-    case Dialup.Router.dispatch(path, assigns) do
+  defp render(state) do
+    case state.app_module.dispatch(state.path, state.assigns) do
       {:ok, html} -> html
       {:error, :not_found} -> "<h1>404 Not Found</h1>"
     end
@@ -99,7 +93,7 @@ defmodule Dialup.UserSessionProcess do
   end
 
   defp update_page(state) do
-    html = render(state.path, state.assigns)
+    html = render(state)
     payload = Jason.encode!(%{html: html, path: state.path})
     send(state.socket_pid, {:send_html, payload})
     state

@@ -82,7 +82,8 @@ const Dialup = (() => {
         if (el) el.textContent = text;
     }
 
-    function connect(initialPath) {
+    function connect() {
+        const initialPath = window.location.pathname;
         currentPath = initialPath;
 
         history.replaceState({ path: initialPath }, "", initialPath);
