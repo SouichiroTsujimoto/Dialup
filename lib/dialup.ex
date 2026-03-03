@@ -1,6 +1,4 @@
 defmodule Dialup do
-  # use Application
-
   defmacro __using__(opts) do
     app_dir = Keyword.fetch!(opts, :app_dir)
     title = Keyword.get(opts, :title, "Dialup App")
@@ -34,14 +32,4 @@ defmodule Dialup do
 
     Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__)
   end
-
-  # @impl Application
-  # def start(_type, _args) do
-  #   children = [
-  #     {Bandit, plug: Dialup.Server, port: 8080}
-  #   ]
-
-  #   opts = [strategy: :one_for_one, name: Dialup.Supervisor]
-  #   Supervisor.start_link(children, opts)
-  # end
 end
