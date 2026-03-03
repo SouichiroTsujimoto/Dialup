@@ -1,6 +1,9 @@
 defmodule Dialup.Page do
   @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t()
+
+  @callback mount(params :: map(), assigns :: map()) :: {:ok, map()}
   @callback mount(assigns :: map()) :: {:ok, map()}
+
   # 再描画なし（状態のみ更新）
   @callback handle_event(event :: binary(), value :: any(), assigns :: map()) ::
               {:noreply, map()}
@@ -9,6 +12,17 @@ defmodule Dialup.Page do
               # 部分re-render（target: DOM要素のid、rendered: ~H または binary）
               | {:patch, target :: binary(), rendered :: any(), map()}
 
+  # mount/1 はオプショナル（静的ページ用）
+  @optional_callbacks mount: 1
+
+  def overwrite(overwrite, assigns) when is_map(overwrite) and is_map(assigns) do
+    Map.merge(assigns, overwrite)
+  end
+
+  def set_default(defaults, assigns) when is_map(defaults) and is_map(assigns) do
+    Map.merge(defaults, assigns)
+  end
+
   defmacro __using__(_opts) do
     quote do
       @behaviour Dialup.Page
@@ -16,10 +30,14 @@ defmodule Dialup.Page do
       import Phoenix.Component
       import Phoenix.HTML, only: [raw: 1]
 
-      def mount(assigns), do: {:ok, assigns}
+      # ローカルでの使用も可能に（import）
+      import Dialup.Page, only: [overwrite: 2, set_default: 2]
+
+      # デフォルト実装（handle_eventのみ）
       def handle_event(_event, _value, assigns), do: {:noreply, assigns}
 
-      defoverridable mount: 1, handle_event: 3
+      # mountはdefoverridableにせず、@before_compileで適切なデフォルトを生成
+      defoverridable handle_event: 3
 
       @before_compile Dialup.Page
     end
@@ -30,38 +48,75 @@ defmodule Dialup.Page do
     has_render = Module.defines?(env.module, {:render, 1})
     has_template = File.exists?(template_path)
 
-    cond do
-      has_render ->
-        :ok
+    # mount/1 と mount/2 の定義をチェック
+    has_mount_1 = Module.defines?(env.module, {:mount, 1})
+    has_mount_2 = Module.defines?(env.module, {:mount, 2})
 
-      has_template ->
-        source = File.read!(template_path)
-
-        compiled =
-          EEx.compile_string(source,
-            engine: Phoenix.LiveView.TagEngine,
-            line: 1,
-            file: template_path,
-            caller: __CALLER__,
-            source: source,
-            tag_handler: Phoenix.LiveView.HTMLEngine
-          )
-
-        quote do
-          @external_resource unquote(template_path)
-
-          def render(assigns) do
-            _ = assigns
-            unquote(compiled)
+    # mount関数の生成
+    mount_quote =
+      cond do
+        has_mount_2 ->
+          quote do
+            # mount/2 が定義済み
           end
-        end
 
-      true ->
-        raise CompileError,
-          file: env.file,
-          line: env.line,
-          description:
-            "#{inspect(env.module)} must define render/1 or provide #{Path.basename(template_path)}"
+        # mount/2 ラッパーを生成
+        has_mount_1 and not has_mount_2 ->
+          quote do
+            def mount(_params, assigns) do
+              mount(assigns)
+            end
+          end
+
+        # デフォルトの mount/2 を生成
+        true ->
+          quote do
+            def mount(_params, assigns), do: {:ok, assigns}
+          end
+      end
+
+    # テンプレート用のrender関数
+    render_quote =
+      cond do
+        has_render ->
+          quote do
+            # render/1 が定義済み
+          end
+
+        has_template ->
+          source = File.read!(template_path)
+
+          compiled =
+            EEx.compile_string(source,
+              engine: Phoenix.LiveView.TagEngine,
+              line: 1,
+              file: template_path,
+              caller: __CALLER__,
+              source: source,
+              tag_handler: Phoenix.LiveView.HTMLEngine
+            )
+
+          quote do
+            @external_resource unquote(template_path)
+
+            def render(assigns) do
+              _ = assigns
+              unquote(compiled)
+            end
+          end
+
+        true ->
+          raise CompileError,
+            file: env.file,
+            line: env.line,
+            description:
+              "#{inspect(env.module)} must define render/1 or provide #{Path.basename(template_path)}"
+      end
+
+    # 両方のコードを結合して返す
+    quote do
+      unquote(mount_quote)
+      unquote(render_quote)
     end
   end
 end

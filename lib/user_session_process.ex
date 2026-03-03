@@ -18,7 +18,7 @@ defmodule Dialup.UserSessionProcess do
   # 初回接続：クライアントが現在のパスを通知してくる
   @impl GenServer
   def handle_cast({:init, path}, state) do
-    new_assigns = mount(path, state)
+    {new_assigns, _params} = mount(path, state)
     {:noreply, %{state | path: path, assigns: new_assigns}}
   end
 
@@ -50,10 +50,10 @@ defmodule Dialup.UserSessionProcess do
     end
   end
 
-  # ページ遷移：新しいページのmount/1を呼ぶ
+  # ページ遷移：新しいページのmount/2を呼ぶ
   @impl GenServer
   def handle_cast({:navigate, path}, state) do
-    new_assigns = mount(path, state)
+    {new_assigns, _params} = mount(path, state)
     new_state = update_page(%{state | path: path, assigns: new_assigns})
     {:noreply, new_state}
   end
@@ -67,14 +67,19 @@ defmodule Dialup.UserSessionProcess do
   def handle_info(_msg, state), do: {:noreply, state}
 
   defp mount(path, state) do
-    case state.app_module.page_for(path) do
-      nil ->
-        state.assigns
+    params = state.app_module.path_params(path)
 
-      page_module ->
-        {:ok, new_assigns} = page_module.mount(state.assigns)
-        new_assigns
-    end
+    new_assigns =
+      case state.app_module.page_for(path) do
+        nil ->
+          state.assigns
+
+        page_module ->
+          {:ok, new_assigns} = page_module.mount(params, Map.put(state.assigns, :params, params))
+          new_assigns
+      end
+
+    {new_assigns, params}
   end
 
   defp render(state) do

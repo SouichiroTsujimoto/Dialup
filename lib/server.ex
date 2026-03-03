@@ -34,7 +34,9 @@ defmodule Dialup.Server do
           "<h1>404 Not Found</h1>"
 
         page_module ->
-          {:ok, assigns} = page_module.mount(%{})
+          # 動的ルートの場合はパラメータを抽出
+          params = app_module.path_params(path)
+          {:ok, assigns} = page_module.mount(params, %{params: params})
 
           case app_module.dispatch(path, assigns) do
             {:ok, html} -> html
