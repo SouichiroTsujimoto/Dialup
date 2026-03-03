@@ -15,11 +15,11 @@ defmodule Dialup.Page do
   # mount/1 はオプショナル（静的ページ用）
   @optional_callbacks mount: 1
 
-  def overwrite(assigns, overwrite) when is_map(overwrite) and is_map(assigns) do
+  def overwrite(assigns, overwrite) when is_map(assigns) and is_map(overwrite) do
     Map.merge(assigns, overwrite)
   end
 
-  def set_default(assigns, defaults) when is_map(defaults) and is_map(assigns) do
+  def set_default(assigns, defaults) when is_map(assigns) and is_map(defaults) do
     Map.merge(defaults, assigns)
   end
 
