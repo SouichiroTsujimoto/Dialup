@@ -5,6 +5,7 @@ const Dialup = (() => {
     let isReconnecting = false;
     let reconnectAttempts = 0;
     let reconnectTimer = null;
+    let hooks = {};
 
     function send(event, value) {
         if (socket && socket.readyState === WebSocket.OPEN) {
@@ -123,6 +124,12 @@ const Dialup = (() => {
                     currentPath = msg.path;
                 }
                 isPopstateNavigation = false;
+
+                // HTML適用後にJSフックを呼ぶ（更新済みDOMにアクセスできる）
+                if (msg.push_event) {
+                    const handler = hooks[msg.push_event];
+                    if (handler) handler(msg.payload ?? {});
+                }
             }
         };
 
@@ -143,7 +150,8 @@ const Dialup = (() => {
         reconnectTimer = setTimeout(connectSocket, delay);
     }
 
-    function connect() {
+    function connect(opts = {}) {
+        hooks = opts.hooks ?? {};
         currentPath = window.location.pathname;
         history.replaceState({ path: currentPath }, "", currentPath);
         setupPopstate();
@@ -151,5 +159,5 @@ const Dialup = (() => {
         connectSocket();
     }
 
-    return { connect };
+    return { connect, send };
 })();

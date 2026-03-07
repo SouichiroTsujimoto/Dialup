@@ -156,6 +156,55 @@ def handle_event("confirm_selection", _value, assigns) do
 end
 ```
 
+### JavaScriptフック（:push_event）
+
+DOMモーフィング以外のJS操作が必要なときに使用する。サーバーが名前付きイベントとペイロードをクライアントに送り、`Dialup.connect` に登録したハンドラを呼び出す。
+
+**サーバー側**
+
+```elixir
+def handle_event("save", params, assigns) do
+  {:ok, item} = Items.create(params)
+  {:push_event, "show_toast", %{message: "保存しました"}, Map.put(assigns, :item, item)}
+end
+```
+
+返り値: `{:push_event, event_name, payload, assigns}`
+
+- `event_name` — クライアント側のハンドラ名（文字列）
+- `payload` — クライアントに渡すデータ（マップ）
+- `assigns` — 更新後の assigns（同時に全体再描画も行われる）
+
+**クライアント側**
+
+```html
+<script>
+Dialup.connect({
+  hooks: {
+    show_toast: ({ message }) => {
+      document.getElementById("toast").textContent = message;
+    },
+    open_modal: ({ id }) => {
+      document.getElementById(id).showModal();
+    },
+    scroll_to_top: () => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+});
+</script>
+```
+
+フックは HTML の morph 適用後に呼ばれるため、更新済みの DOM にアクセスできる。フックが登録されていないイベント名は無視される。
+
+**`handle_info` からも使用可能**
+
+```elixir
+def handle_info({:notification, msg}, assigns) do
+  {:push_event, "show_toast", %{message: msg}, assigns}
+end
+```
+
 ### リダイレクト（:redirect）
 
 イベント処理後に別URLへ遷移させる。session は保持したまま、新しいページの `mount/2` が呼ばれる。

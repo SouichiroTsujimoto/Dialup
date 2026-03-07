@@ -124,6 +124,12 @@ defmodule Dialup.UserSessionProcess do
             {:redirect, path, new_merged} ->
               {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
               {:noreply, do_navigate(path, %{state | session: new_session, assigns: new_assigns})}
+
+            {:push_event, event_name, event_payload, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              new_state = %{state | session: new_session, assigns: new_assigns}
+              send_push_event(new_state, event_name, event_payload)
+              {:noreply, new_state}
           end
         rescue
           e ->
@@ -137,6 +143,11 @@ defmodule Dialup.UserSessionProcess do
   @impl GenServer
   def handle_cast({:navigate, path}, state) do
     {:noreply, do_navigate(path, state)}
+  end
+
+  # ホットリロード：ファイル変更時に現在の state で再描画
+  def handle_info(:dialup_reload, state) do
+    {:noreply, update_page(state)}
   end
 
   # WebSocketプロセスが落ちたら即死せず、タイムアウトまで生存する
@@ -179,6 +190,12 @@ defmodule Dialup.UserSessionProcess do
             {:redirect, path, new_merged} ->
               {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
               {:noreply, do_navigate(path, %{state | session: new_session, assigns: new_assigns})}
+
+            {:push_event, event_name, event_payload, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              new_state = %{state | session: new_session, assigns: new_assigns}
+              send_push_event(new_state, event_name, event_payload)
+              {:noreply, new_state}
           end
         rescue
           e ->
@@ -206,6 +223,14 @@ defmodule Dialup.UserSessionProcess do
         new_state = %{state | path: path}
         send_error(new_state, e, __STACKTRACE__)
         new_state
+    end
+  end
+
+  defp send_push_event(state, event_name, event_payload) do
+    if state.socket_pid do
+      html = render(state)
+      msg = Jason.encode!(%{html: html, path: state.path, push_event: event_name, payload: event_payload})
+      send(state.socket_pid, {:send_html, msg})
     end
   end
 

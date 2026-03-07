@@ -85,10 +85,20 @@ end
 ### 5. 起動
 
 ```bash
-mix run --no-halt
+iex -S mix
 ```
 
 ブラウザで `http://localhost:4000` にアクセス。
+
+## 開発時ホットリロード
+
+`iex -S mix` で起動すると、開発環境（`Mix.env() == :dev`）では自動的に `Dialup.Reloader` が起動する。`lib/` 以下の `.ex` ファイルを保存するたびに：
+
+1. 変更を検出（ポーリング間隔: 500ms）
+2. 自動でリコンパイル
+3. 既存のWebSocket経由でブラウザを更新（ページリロードなし）
+
+`mix run --no-halt` や本番環境では Reloader は起動しない。
 
 ## プロジェクト構成
 

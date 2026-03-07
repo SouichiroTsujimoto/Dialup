@@ -85,7 +85,8 @@ end
 ```elixir
 def handle_event(event :: String.t(), value :: any(), assigns :: map()) ::
   {:noreply, map()} | {:update, map()} |
-  {:patch, String.t(), any(), map()} | {:redirect, String.t(), map()}
+  {:patch, String.t(), any(), map()} | {:redirect, String.t(), map()} |
+  {:push_event, String.t(), map(), map()}
 ```
 
 `assigns` には `session + assigns + params` がマージされた状態が渡される。
@@ -98,6 +99,7 @@ def handle_event(event :: String.t(), value :: any(), assigns :: map()) ::
 | `{:update, assigns}` | 全体を再描画 |
 | `{:patch, target_id, html, assigns}` | 指定IDの要素のみ更新 |
 | `{:redirect, path, assigns}` | 別URLへ遷移（session保持、assigns リセット） |
+| `{:push_event, name, payload, assigns}` | JSフックを呼び出す（全体再描画も行う） |
 
 ```elixir
 # 再描画なし（頻繁なイベントに）
@@ -131,7 +133,8 @@ end
 ```elixir
 def handle_info(msg :: any(), assigns :: map()) ::
   {:noreply, map()} | {:update, map()} |
-  {:patch, String.t(), any(), map()} | {:redirect, String.t(), map()}
+  {:patch, String.t(), any(), map()} | {:redirect, String.t(), map()} |
+  {:push_event, String.t(), map(), map()}
 ```
 
 `Process.send_after/3` や `Phoenix.PubSub` などからのメッセージを受け取る。返り値は `handle_event/3` と同じ。

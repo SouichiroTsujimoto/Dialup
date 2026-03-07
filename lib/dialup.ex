@@ -26,11 +26,18 @@ defmodule Dialup do
     app_module = Keyword.fetch!(opts, :app)
     port = Keyword.get(opts, :port, 4000)
 
-    children = [
+    base_children = [
       {Registry, keys: :unique, name: Dialup.SessionRegistry},
       {DynamicSupervisor, name: Dialup.SessionSupervisor, strategy: :one_for_one},
       {Bandit, plug: {Dialup.Server, app: app_module}, port: port}
     ]
+
+    children =
+      if Code.ensure_loaded?(Mix) and Mix.env() == :dev do
+        [{Dialup.Reloader, [Path.join(File.cwd!(), "lib")]} | base_children]
+      else
+        base_children
+      end
 
     Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__)
   end
