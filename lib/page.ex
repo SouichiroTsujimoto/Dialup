@@ -12,11 +12,13 @@ defmodule Dialup.Page do
               {:noreply, map()}
               | {:update, map()}
               | {:patch, target :: binary(), rendered :: any(), map()}
+              | {:redirect, path :: binary(), map()}
 
   @callback handle_info(msg :: any(), assigns :: map()) ::
               {:noreply, map()}
               | {:update, map()}
               | {:patch, target :: binary(), rendered :: any(), map()}
+              | {:redirect, path :: binary(), map()}
 
   # mount/1, handle_info はオプショナル
   @optional_callbacks mount: 1, handle_info: 2

@@ -100,6 +100,10 @@ defmodule Dialup.UserSessionProcess do
             payload = Jason.encode!(%{target: target, html: html})
             send(state.socket_pid, {:send_html, payload})
             {:noreply, %{state | session: new_session, assigns: new_assigns}}
+
+          {:redirect, path, new_merged} ->
+            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+            {:noreply, do_navigate(path, %{state | session: new_session, assigns: new_assigns})}
         end
     end
   end
@@ -107,10 +111,7 @@ defmodule Dialup.UserSessionProcess do
   # ページ遷移：session は保持、assigns をリセットして page.mount を呼ぶ
   @impl GenServer
   def handle_cast({:navigate, path}, state) do
-    params = state.app_module.path_params(path)
-    assigns = mount_page(path, params, state.session, state.session_keys, state.app_module)
-    new_state = update_page(%{state | path: path, params: params, assigns: assigns})
-    {:noreply, new_state}
+    {:noreply, do_navigate(path, state)}
   end
 
   # WebSocketプロセスが落ちたら即死せず、タイムアウトまで生存する
@@ -148,8 +149,19 @@ defmodule Dialup.UserSessionProcess do
             payload = Jason.encode!(%{target: target, html: html})
             send(state.socket_pid, {:send_html, payload})
             {:noreply, %{state | session: new_session, assigns: new_assigns}}
+
+          {:redirect, path, new_merged} ->
+            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+            {:noreply, do_navigate(path, %{state | session: new_session, assigns: new_assigns})}
         end
     end
+  end
+
+  # session を保持しつつ新しいパスに遷移する（navigate / redirect 共通）
+  defp do_navigate(path, state) do
+    params = state.app_module.path_params(path)
+    assigns = mount_page(path, params, state.session, state.session_keys, state.app_module)
+    update_page(%{state | path: path, params: params, assigns: assigns})
   end
 
   # layout.mount を順番に呼び、session と session_keys を構築する
