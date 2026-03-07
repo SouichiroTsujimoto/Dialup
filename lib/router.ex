@@ -134,9 +134,11 @@ defmodule Dialup.Router do
       def __routes__, do: @routes
 
       def layouts_for(path) do
-        case Map.get(@static_routes, path) do
+        {clean_path, _} = split_path_query(path)
+
+        case Map.get(@static_routes, clean_path) do
           nil ->
-            case match_dynamic_route(path) do
+            case match_dynamic_route(clean_path) do
               nil -> []
               {_, info} -> info.layouts
             end
@@ -147,10 +149,11 @@ defmodule Dialup.Router do
       end
 
       def page_for(path) do
-        case Map.get(@static_routes, path) do
+        {clean_path, _} = split_path_query(path)
+
+        case Map.get(@static_routes, clean_path) do
           nil ->
-            # 静的ルートにない場合、動的ルートを検索
-            case match_dynamic_route(path) do
+            case match_dynamic_route(clean_path) do
               nil -> nil
               {_, info} -> info.page
             end
@@ -161,39 +164,49 @@ defmodule Dialup.Router do
       end
 
       def path_params(path) do
-        case Map.get(@static_routes, path) do
-          nil ->
-            case match_dynamic_route(path) do
-              nil -> %{}
-              {_, info} -> extract_params(path, info.pattern)
-            end
+        {clean_path, query} = split_path_query(path)
+        query_params = parse_query_string(query)
 
-          _ ->
-            %{}
-        end
+        path_only_params =
+          case Map.get(@static_routes, clean_path) do
+            nil ->
+              case match_dynamic_route(clean_path) do
+                nil -> %{}
+                {_, info} -> extract_params(clean_path, info.pattern)
+              end
+
+            _ ->
+              %{}
+          end
+
+        # パスパラメータがクエリパラメータより優先される
+        Map.merge(query_params, path_only_params)
       end
 
       def dispatch(path, assigns) do
-        case Map.get(@static_routes, path) do
+        {clean_path, _} = split_path_query(path)
+
+        case Map.get(@static_routes, clean_path) do
           nil ->
-            # 静的にない場合、動的ルートを試す
-            case match_dynamic_route(path) do
-              nil ->
-                {:error, :not_found}
-
-              {_route_path, info} ->
-                # パラメータを抽出してassignsに追加
-                params = extract_params(path, info.pattern)
-                assigns_with_params = Map.put(assigns, :params, params)
-
-                {:ok,
-                 Dialup.Router.render_with_layouts(info.page, info.layouts, assigns_with_params)}
+            case match_dynamic_route(clean_path) do
+              nil -> {:error, :not_found}
+              {_, info} -> {:ok, Dialup.Router.render_with_layouts(info.page, info.layouts, assigns)}
             end
 
           %{page: page_mod, layouts: layouts} ->
             {:ok, Dialup.Router.render_with_layouts(page_mod, layouts, assigns)}
         end
       end
+
+      defp split_path_query(path) do
+        case String.split(path, "?", parts: 2) do
+          [p, q] -> {p, q}
+          [p] -> {p, ""}
+        end
+      end
+
+      defp parse_query_string(""), do: %{}
+      defp parse_query_string(query), do: URI.decode_query(query)
 
       # 動的ルートマッチング
       defp match_dynamic_route(path) do
