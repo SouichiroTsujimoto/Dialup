@@ -1,0 +1,138 @@
+defmodule Dialup.App.Root do
+  @moduledoc """
+  Home page at /.
+  """
+
+  use Dialup.Page
+
+  @impl true
+  def mount(_params, assigns) do
+    {:ok, Map.merge(assigns, %{count: 0})}
+  end
+
+  @impl true
+  def handle_event("increment", _value, assigns) do
+    new_count = assigns.count + 1
+    new_assigns = Map.put(assigns, :count, new_count)
+
+    # Use :patch for partial updates - only re-renders the counter element
+    {:patch, "counter", render_counter(new_assigns), new_assigns}
+  end
+
+  @impl true
+  def handle_event("reset", _value, assigns) do
+    new_assigns = Map.put(assigns, :count, 0)
+    {:patch, "counter", render_counter(new_assigns), new_assigns}
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <style>
+      .hero {
+        text-align: center;
+        padding: 4rem 2rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 12px;
+        margin-bottom: 2rem;
+      }
+      .hero h1 {
+        font-size: 3rem;
+        margin: 0 0 1rem 0;
+        font-weight: 700;
+      }
+      .hero p {
+        font-size: 1.25rem;
+        opacity: 0.9;
+        margin: 0;
+      }
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 2rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        max-width: 400px;
+        margin: 0 auto;
+        text-align: center;
+      }
+      .button-group {
+        display: flex;
+        gap: 0.75rem;
+        justify-content: center;
+        margin-top: 1.5rem;
+      }
+      .btn {
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .btn-primary {
+        background: #3b82f6;
+        color: white;
+      }
+      .btn-primary:hover {
+        background: #2563eb;
+      }
+      .btn-secondary {
+        background: #e5e7eb;
+        color: #374151;
+      }
+      .btn-secondary:hover {
+        background: #d1d5db;
+      }
+      .counter-value {
+        font-size: 4rem;
+        font-weight: 700;
+        color: #3b82f6;
+        margin: 1rem 0;
+        line-height: 1;
+      }
+      .info {
+        text-align: center;
+        color: #6b7280;
+        margin-top: 2rem;
+        font-size: 0.875rem;
+      }
+      .info code {
+        background: #f3f4f6;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-family: monospace;
+      }
+    </style>
+
+    <div class="hero">
+      <h1>Welcome!</h1>
+      <p>A Dialup WebSocket application</p>
+    </div>
+
+      <%= "<%=" %> render_counter(assigns) %>
+
+    <p class="info">
+      This counter uses <code>:patch</code> for efficient partial updates.
+    </p>
+    """
+  end
+
+  defp render_counter(assigns) do
+    ~H"""
+    <div id="counter" class="card">
+      <h2>🔢 Counter Demo</h2>
+      <div class="counter-value">{@count}</div>
+      <div class="button-group">
+        <button class="btn btn-primary" ws-event="increment">
+          + Increment
+        </button>
+        <button class="btn btn-secondary" ws-event="reset">
+          Reset
+        </button>
+      </div>
+    </div>
+    """
+  end
+end

@@ -1,0 +1,29 @@
+defmodule Dialup.App.Layout do
+  @moduledoc """
+  Root layout shared across all pages.
+  Session data set here persists across navigation.
+
+  This layout renders inside the <main id="dialup-root"> element
+  defined by the shell (root.html.heex). Do not include <html>,
+  <head>, or <body> tags here.
+  """
+
+  use Dialup.Layout
+
+  @impl true
+  def mount(session) do
+    {:ok, session}
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <header>
+      <nav>
+        <a ws-href="/">Home</a>
+      </nav>
+    </header>
+      <%= "<%=" %> raw(@inner_content) %>
+    """
+  end
+end

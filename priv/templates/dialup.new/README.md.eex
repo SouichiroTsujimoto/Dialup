@@ -1,0 +1,28 @@
+# <%= mod %>
+
+A Dialup web application.
+
+## Getting Started
+
+To start your Dialup application:
+
+```bash
+mix deps.get
+mix run --no-halt
+```
+
+Then visit [`http://localhost:4000`](http://localhost:4000).
+
+## Project Structure
+
+```
+lib/
+├── <%= app %>.ex          # Application module
+└── app/
+    ├── layout.ex          # Root layout
+    └── page.ex            # Home page at /
+```
+
+## Learn More
+
+* [Dialup Documentation](https://hexdocs.pm/dialup)

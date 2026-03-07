@@ -8,6 +8,7 @@ defmodule Dialup.MixProject do
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      package: package(),
 
       # ドキュメント生成設定
       name: "Dialup",
@@ -54,6 +55,18 @@ defmodule Dialup.MixProject do
 
       # 開発依存
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
+    ]
+  end
+
+  defp package do
+    [
+      name: :dialup,
+      description: "WebSocket-first, file-based routing Elixir framework",
+      licenses: ["MIT"],
+      links: %{
+        "GitHub" => "https://github.com/SouichiroTsujimoto/Dialup"
+      },
+      files: ~w(lib priv mix.exs README.md LICENSE)
     ]
   end
 end
