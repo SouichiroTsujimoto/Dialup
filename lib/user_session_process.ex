@@ -44,22 +44,35 @@ defmodule Dialup.UserSessionProcess do
   # 初回接続：layout.mount → session、page.mount → assigns
   @impl GenServer
   def handle_cast({:init, path}, state) do
-    params = state.app_module.path_params(path)
-    {session, session_keys} = mount_session(path, state.app_module)
-    assigns = mount_page(path, params, session, session_keys, state.app_module)
-
-    {:noreply, %{state | path: path, params: params, session: session, session_keys: session_keys, assigns: assigns}}
+    try do
+      params = state.app_module.path_params(path)
+      {session, session_keys} = mount_session(path, state.app_module)
+      assigns = mount_page(path, params, session, session_keys, state.app_module)
+      {:noreply, %{state | path: path, params: params, session: session, session_keys: session_keys, assigns: assigns}}
+    rescue
+      e ->
+        new_state = %{state | path: path}
+        send_error(new_state, e, __STACKTRACE__)
+        {:noreply, new_state}
+    end
   end
 
   # 再接続：プロセスが生存していれば現在のstateで再描画、タイムアウト済みならフルmount
   @impl GenServer
   def handle_cast({:reconnect, path}, state) do
     if state.path == nil do
-      params = state.app_module.path_params(path)
-      {session, session_keys} = mount_session(path, state.app_module)
-      assigns = mount_page(path, params, session, session_keys, state.app_module)
-      new_state = update_page(%{state | path: path, params: params, session: session, session_keys: session_keys, assigns: assigns})
-      {:noreply, new_state}
+      try do
+        params = state.app_module.path_params(path)
+        {session, session_keys} = mount_session(path, state.app_module)
+        assigns = mount_page(path, params, session, session_keys, state.app_module)
+        new_state = update_page(%{state | path: path, params: params, session: session, session_keys: session_keys, assigns: assigns})
+        {:noreply, new_state}
+      rescue
+        e ->
+          new_state = %{state | path: path}
+          send_error(new_state, e, __STACKTRACE__)
+          {:noreply, new_state}
+      end
     else
       {:noreply, update_page(state)}
     end
@@ -84,26 +97,32 @@ defmodule Dialup.UserSessionProcess do
       page_module ->
         merged = merge_for_render(state)
 
-        case page_module.handle_event(event, value, merged) do
-          {:noreply, new_merged} ->
-            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-            {:noreply, %{state | session: new_session, assigns: new_assigns}}
+        try do
+          case page_module.handle_event(event, value, merged) do
+            {:noreply, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              {:noreply, %{state | session: new_session, assigns: new_assigns}}
 
-          {:update, new_merged} ->
-            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-            new_state = update_page(%{state | session: new_session, assigns: new_assigns})
-            {:noreply, new_state}
+            {:update, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              new_state = update_page(%{state | session: new_session, assigns: new_assigns})
+              {:noreply, new_state}
 
-          {:patch, target, rendered, new_merged} ->
-            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-            html = to_html(rendered)
-            payload = Jason.encode!(%{target: target, html: html})
-            send(state.socket_pid, {:send_html, payload})
-            {:noreply, %{state | session: new_session, assigns: new_assigns}}
+            {:patch, target, rendered, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              html = to_html(rendered)
+              payload = Jason.encode!(%{target: target, html: html})
+              send(state.socket_pid, {:send_html, payload})
+              {:noreply, %{state | session: new_session, assigns: new_assigns}}
 
-          {:redirect, path, new_merged} ->
-            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-            {:noreply, do_navigate(path, %{state | session: new_session, assigns: new_assigns})}
+            {:redirect, path, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              {:noreply, do_navigate(path, %{state | session: new_session, assigns: new_assigns})}
+          end
+        rescue
+          e ->
+            send_error(state, e, __STACKTRACE__)
+            {:noreply, state}
         end
     end
   end
@@ -134,34 +153,75 @@ defmodule Dialup.UserSessionProcess do
       page_module ->
         merged = merge_for_render(state)
 
-        case page_module.handle_info(msg, merged) do
-          {:noreply, new_merged} ->
-            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-            {:noreply, %{state | session: new_session, assigns: new_assigns}}
+        try do
+          case page_module.handle_info(msg, merged) do
+            {:noreply, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              {:noreply, %{state | session: new_session, assigns: new_assigns}}
 
-          {:update, new_merged} ->
-            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-            {:noreply, update_page(%{state | session: new_session, assigns: new_assigns})}
+            {:update, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              {:noreply, update_page(%{state | session: new_session, assigns: new_assigns})}
 
-          {:patch, target, rendered, new_merged} ->
-            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-            html = to_html(rendered)
-            payload = Jason.encode!(%{target: target, html: html})
-            send(state.socket_pid, {:send_html, payload})
-            {:noreply, %{state | session: new_session, assigns: new_assigns}}
+            {:patch, target, rendered, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              html = to_html(rendered)
+              payload = Jason.encode!(%{target: target, html: html})
+              send(state.socket_pid, {:send_html, payload})
+              {:noreply, %{state | session: new_session, assigns: new_assigns}}
 
-          {:redirect, path, new_merged} ->
-            {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-            {:noreply, do_navigate(path, %{state | session: new_session, assigns: new_assigns})}
+            {:redirect, path, new_merged} ->
+              {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+              {:noreply, do_navigate(path, %{state | session: new_session, assigns: new_assigns})}
+          end
+        rescue
+          e ->
+            send_error(state, e, __STACKTRACE__)
+            {:noreply, state}
         end
     end
   end
 
   # session を保持しつつ新しいパスに遷移する（navigate / redirect 共通）
   defp do_navigate(path, state) do
-    params = state.app_module.path_params(path)
-    assigns = mount_page(path, params, state.session, state.session_keys, state.app_module)
-    update_page(%{state | path: path, params: params, assigns: assigns})
+    try do
+      params = state.app_module.path_params(path)
+      assigns = mount_page(path, params, state.session, state.session_keys, state.app_module)
+      update_page(%{state | path: path, params: params, assigns: assigns})
+    rescue
+      e ->
+        new_state = %{state | path: path}
+        send_error(new_state, e, __STACKTRACE__)
+        new_state
+    end
+  end
+
+  defp send_error(state, exception, stacktrace) do
+    if state.socket_pid do
+      html = render_error_html(exception, stacktrace)
+      payload = Jason.encode!(%{html: html, path: state.path || "/"})
+      send(state.socket_pid, {:send_html, payload})
+    end
+  end
+
+  defp render_error_html(exception, stacktrace) do
+    message = escape_html(Exception.message(exception))
+    trace = escape_html(Exception.format(:error, exception, stacktrace))
+
+    """
+    <div id="dialup-root" style="padding:2rem;font-family:monospace;background:#fff5f5;border-left:4px solid #c0392b">
+      <h2 style="color:#c0392b;margin-top:0">500 Internal Server Error</h2>
+      <p><strong>#{message}</strong></p>
+      <pre style="overflow:auto;background:#f8f8f8;padding:1rem;font-size:.85rem">#{trace}</pre>
+    </div>
+    """
+  end
+
+  defp escape_html(str) do
+    str
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
   end
 
   # layout.mount を順番に呼び、session と session_keys を構築する
