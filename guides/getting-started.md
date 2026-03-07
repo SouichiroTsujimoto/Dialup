@@ -30,7 +30,9 @@ my_app/
     ├── my_app.ex        # Applicationモジュール
     └── app/
         ├── layout.ex    # Dialup.App.Layout（ルートレイアウト）
-        └── page.ex      # Dialup.App.Root（ホームページ）
+        ├── layout.css   # レイアウト共通スタイル（コロケーション CSS）
+        ├── page.ex      # Dialup.App.Root（ホームページ）
+        └── page.css     # ホームページ固有スタイル（コロケーション CSS）
 ```
 
 #### ジェネレータのオプション
@@ -172,10 +174,10 @@ mix run --no-halt
 
 ## 開発時ホットリロード
 
-開発環境（`Mix.env() == :dev`）では自動的に `Dialup.Reloader` が起動します。`lib/` 以下の `.ex` ファイルを保存するたびに：
+開発環境（`Mix.env() == :dev`）では自動的に `Dialup.Reloader` が起動します。`lib/` 以下の `.ex` / `.css` ファイルを保存するたびに：
 
 1. 変更を検出（ポーリング間隔: 500ms）
-2. 自動でリコンパイル
+2. 自動でリコンパイル（`.css` 変更は `@external_resource` 経由で対応する `.ex` も再コンパイル）
 3. 既存のWebSocket経由でブラウザを更新（ページリロードなし）
 
 ## プロジェクト構成
@@ -187,14 +189,32 @@ lib/
 ├── my_app.ex              # Applicationモジュール（use Dialup）
 └── app/
     ├── layout.ex          # Dialup.App.Layout（共通レイアウト）
+    ├── layout.css         # 全ページ共通スタイル（オプション）
     ├── page.ex            # Dialup.App.Root（/ ルートページ）
+    ├── page.css           # / 固有スタイル（オプション）
     ├── about/
     │   └── page.ex        # Dialup.App.About（/about）
     └── users/
-        ├── [id]/
-        │   └── page.ex    # Dialup.App.Users.Id（/users/:id）
-        └── layout.ex      # Dialup.App.Users.Layout（/users以下のレイアウト）
+        ├── layout.ex      # Dialup.App.Users.Layout（/users以下のレイアウト）
+        ├── layout.css     # /users 配下全ページのスタイル（オプション）
+        └── [id]/
+            └── page.ex    # Dialup.App.Users.Id（/users/:id）
 ```
+
+### コロケーション CSS
+
+`page.ex` / `layout.ex` と同名の `.css` ファイルをコロケーション（同ディレクトリに配置）すると、コンパイル時に自動でスコーピングされて注入される。ビルドツール不要。
+
+```css
+/* lib/app/page.css */
+.hero {
+  text-align: center;
+  padding: 4rem 2rem;
+}
+h1 { font-size: 3rem; }
+```
+
+CSS はモジュール名由来の一意なクラス（`d-xxxxxxx`）でラップされ、他ページへの影響を防ぐ。`layout.css` はその layout が包む全子ページに自然にカスケードする。詳細は [Routing](./routing.md#コロケーション-css) を参照。
 
 ### 命名規則
 
@@ -212,5 +232,5 @@ lib/
 
 ## 次のステップ
 
-- [Routing](./routing.md) - URLとページの対応関係
+- [Routing](./routing.md) - URLとページの対応関係 / コロケーション CSS
 - [Lifecycle](./lifecycle.md) - mount/render/handle_eventの流れ

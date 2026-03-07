@@ -6,6 +6,8 @@ defmodule Dialup.App.Layout do
   This layout renders inside the <main id="dialup-root"> element
   defined by the shell (root.html.heex). Do not include <html>,
   <head>, or <body> tags here.
+
+  Styles live in layout.css (colocated CSS — auto-scoped at compile time).
   """
 
   use Dialup.Layout
@@ -18,12 +20,22 @@ defmodule Dialup.App.Layout do
   @impl true
   def render(assigns) do
     ~H"""
-    <header>
-      <nav>
-        <a ws-href="/">Home</a>
-      </nav>
-    </header>
+    <nav class="site-nav">
+      <div class="nav-inner">
+        <span class="nav-logo" ws-href="/">⚡ My App</span>
+        <div class="nav-links">
+          <span ws-href="/">Home</span>
+        </div>
+      </div>
+    </nav>
+
+    <main class="page-content">
       <%= "<%=" %> raw(@inner_content) %>
+    </main>
+
+    <footer class="site-footer">
+      <p>Built with <a href="https://github.com/[your-repo]/dialup">Dialup</a> · 1 tab = 1 process</p>
+    </footer>
     """
   end
 end

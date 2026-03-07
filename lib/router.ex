@@ -248,12 +248,43 @@ defmodule Dialup.Router do
 
   def render_with_layouts(page_mod, layouts, assigns) do
     page_html = page_mod.render(assigns) |> to_html()
+    page_html = wrap_with_scope(page_html, page_mod)
 
-    layouts
-    |> Enum.reverse()
-    |> Enum.reduce(page_html, fn layout_mod, inner ->
-      layout_mod.render(Map.put(assigns, :inner_content, inner)) |> to_html()
+    wrapped =
+      layouts
+      |> Enum.reverse()
+      |> Enum.reduce(page_html, fn layout_mod, inner ->
+        html = layout_mod.render(Map.put(assigns, :inner_content, inner)) |> to_html()
+        wrap_with_scope(html, layout_mod)
+      end)
+
+    css = collect_css(layouts, page_mod)
+
+    case css do
+      "" -> wrapped
+      _ -> ~s(<style data-dialup-css>) <> css <> "</style>" <> wrapped
+    end
+  end
+
+  defp wrap_with_scope(html, mod) do
+    if function_exported?(mod, :__css_scope__, 0) do
+      case mod.__css_scope__() do
+        nil -> html
+        scope -> ~s(<div class="#{scope}">) <> html <> "</div>"
+      end
+    else
+      html
+    end
+  end
+
+  defp collect_css(layouts, page_mod) do
+    (layouts ++ [page_mod])
+    |> Enum.map(fn mod ->
+      if function_exported?(mod, :__css__, 0), do: mod.__css__() || "", else: ""
     end)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+    |> String.trim()
   end
 
   defp to_html(rendered) do

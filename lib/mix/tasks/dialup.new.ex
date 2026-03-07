@@ -138,7 +138,9 @@ defmodule Mix.Tasks.Dialup.New do
       {"formatter.exs", ".formatter.exs"},
       {"app.ex", "lib/#{app_string}.ex"},
       {"layout.ex", "lib/app/layout.ex"},
-      {"page.ex", "lib/app/page.ex"}
+      {"layout.css", "lib/app/layout.css"},
+      {"page.ex", "lib/app/page.ex"},
+      {"page.css", "lib/app/page.css"}
     ]
   end
 end

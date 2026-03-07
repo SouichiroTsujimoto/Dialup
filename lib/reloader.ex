@@ -75,7 +75,7 @@ defmodule Dialup.Reloader do
 
   defp scan(dirs) do
     dirs
-    |> Enum.flat_map(&Path.wildcard("#{&1}/**/*.ex"))
+    |> Enum.flat_map(&Path.wildcard("#{&1}/**/*.{ex,css}"))
     |> Map.new(&{&1, File.stat!(&1).mtime})
   end
 end

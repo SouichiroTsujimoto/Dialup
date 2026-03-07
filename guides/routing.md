@@ -129,6 +129,56 @@ app/users/[id]/page.ex     → 動的: /users/:id
 te/users/123     → 動的ルートがマッチ
 ```
 
+## コロケーション CSS
+
+`page.ex` / `layout.ex` と同じディレクトリに同名の `.css` ファイルを置くと、コンパイル時に自動検出・スコーピングされる。
+
+```
+app/
+├── layout.ex
+├── layout.css      ← 全ページ共通スタイル
+├── page.ex
+├── page.css        ← / のみに適用
+└── docs/
+    ├── layout.css  ← /docs 配下全ページに適用
+    └── page.css    ← /docs トップのみに適用
+```
+
+### スコーピングの仕組み
+
+モジュール名の MD5 先頭 7 文字から `d-xxxxxxx` というスコープクラスを生成し、CSS をネイティブ CSS nesting でラップする：
+
+```css
+/* page.css に書いたもの → コンパイル後 */
+.d-a1b2c3 {
+  h1 { color: blue; }
+  .card { padding: 1rem; }
+}
+```
+
+レンダリング時にそのページの HTML が `<div class="d-a1b2c3">...</div>` でラップされる。CSS は `<style data-dialup-css>` としてその直前に注入される。
+
+### layout.css のカスケード
+
+layout.css のスコープ div は全子ページの HTML を包むため、layout.css に書いたスタイルは配下の全ページに自然にカスケードする：
+
+```html
+<div class="d-layout">           <!-- app/layout.css のスコープ -->
+  <header>...</header>
+  <div class="d-docs-layout">    <!-- docs/layout.css のスコープ -->
+    <div class="d-docs-page">    <!-- docs/page.css のスコープ -->
+      <h1>Docs</h1>
+    </div>
+  </div>
+</div>
+```
+
+### 注意事項
+
+- CSS が存在しないページでは `<style>` タグも wrapper div も出力されない（オーバーヘッドゼロ）
+- `.css` 変更時は `@external_resource` 経由で対応する `.ex` が自動再コンパイルされ、ホットリロードが動作する
+- CSS nesting はモダンブラウザ 96%+ でサポート（Chrome 120+, Firefox 117+, Safari 17.2+）
+
 ## 制限事項
 
 - 正規表現やカスタムパターンマッチは不可

@@ -131,10 +131,39 @@ defmodule Dialup.Page do
               "#{inspect(env.module)} must define render/1 or provide #{Path.basename(template_path)}"
       end
 
+    css_path = env.file |> Path.rootname(".ex") |> Kernel.<>(".css")
+
+    css_quote =
+      if File.exists?(css_path) do
+        css_content = File.read!(css_path)
+
+        scope_class =
+          "d-" <>
+            (env.module
+             |> Atom.to_string()
+             |> :erlang.md5()
+             |> Base.encode16(case: :lower)
+             |> binary_part(0, 7))
+
+        scoped_css = ".#{scope_class} {\n#{css_content}\n}"
+
+        quote do
+          @external_resource unquote(css_path)
+          def __css__, do: unquote(scoped_css)
+          def __css_scope__, do: unquote(scope_class)
+        end
+      else
+        quote do
+          def __css__, do: nil
+          def __css_scope__, do: nil
+        end
+      end
+
     # 両方のコードを結合して返す
     quote do
       unquote(mount_quote)
       unquote(render_quote)
+      unquote(css_quote)
     end
   end
 end

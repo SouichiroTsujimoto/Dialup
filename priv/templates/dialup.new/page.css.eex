@@ -1,0 +1,144 @@
+/* page.css — colocated styles for app/page.ex (Neobrutalist theme)
+   Scoped to this page only. Edit freely; CSS changes hot-reload automatically. */
+
+/* ── Hero ── */
+.hero {
+  background: var(--accent);
+  border-bottom: var(--border);
+  padding: 5rem 2rem 4rem;
+}
+
+.hero-inner {
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+.hero h1 {
+  font-size: clamp(2.75rem, 7vw, 5.5rem);
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -3px;
+  text-transform: uppercase;
+  margin: 0 0 1.5rem;
+  color: var(--black);
+}
+
+.brand {
+  color: var(--black);
+  position: relative;
+  display: inline-block;
+  background: var(--black);
+  color: var(--accent);
+  padding: 0 0.25em;
+}
+
+.hero-sub {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--black);
+  margin: 0 0 3rem;
+  max-width: 460px;
+  border-left: 4px solid var(--black);
+  padding-left: 1rem;
+  line-height: 1.5;
+}
+
+.hint {
+  margin-top: 2.5rem;
+  font-size: 0.8rem;
+  font-family: 'Courier New', Courier, monospace;
+  color: #333;
+  font-weight: 600;
+}
+
+.hint code {
+  background: rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  padding: 0.1em 0.4em;
+  font-family: inherit;
+}
+
+/* ── Counter card ── */
+.counter-card {
+  display: inline-block;
+  border: var(--border);
+  box-shadow: var(--shadow);
+  padding: 2rem 2.5rem;
+  background: var(--white);
+  text-align: center;
+  min-width: 280px;
+}
+
+.counter-label {
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #555;
+  margin: 0 0 0.75rem;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.counter-value {
+  font-size: 5.5rem;
+  font-weight: 900;
+  color: var(--black);
+  line-height: 1;
+  margin: 0 0 1.5rem;
+  font-family: 'Courier New', Courier, monospace;
+  letter-spacing: -4px;
+}
+
+.counter-actions {
+  display: flex;
+  gap: 0;
+  justify-content: center;
+}
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.65rem 1.4rem;
+  border: var(--border);
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: transform 0.08s, box-shadow 0.08s;
+  position: relative;
+}
+
+.btn + .btn {
+  border-left: none;
+}
+
+.btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: none !important;
+}
+
+.btn-primary {
+  background: var(--black);
+  color: var(--white);
+  box-shadow: 4px 4px 0 #555;
+}
+
+.btn-primary:hover {
+  box-shadow: 6px 6px 0 #555;
+  transform: translate(-1px, -1px);
+}
+
+.btn-ghost {
+  background: var(--white);
+  color: var(--black);
+  box-shadow: 4px 4px 0 var(--black);
+}
+
+.btn-ghost:hover {
+  background: var(--accent);
+  box-shadow: 6px 6px 0 var(--black);
+  transform: translate(-1px, -1px);
+}
