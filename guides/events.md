@@ -90,14 +90,34 @@ end
 
 クライアントからのイベントではなく、プロセスメッセージを受け取る場合に使用する。
 
+### PubSub の購読
+
+`subscribe/2` を使うとナビゲーション時の自動 unsubscribe が有効になる。
+
 ```elixir
 def mount(_params, assigns) do
-  Phoenix.PubSub.subscribe(MyApp.PubSub, "notifications")
+  subscribe(MyApp.PubSub, "notifications")  # 自動 unsubscribe 付き
   {:ok, %{notifications: []}}
 end
 
 def handle_info({:notification, msg}, assigns) do
   {:update, Map.update!(assigns, :notifications, &[msg | &1])}
+end
+```
+
+別ページに遷移すると、フレームワークが自動的に `"notifications"` を unsubscribe する。`Phoenix.PubSub.subscribe/2` を直接呼ぶとこの自動管理は行われない。
+
+### タイマー
+
+```elixir
+def mount(_params, assigns) do
+  Process.send_after(self(), :tick, 1_000)
+  {:ok, %{count: 0}}
+end
+
+def handle_info(:tick, assigns) do
+  Process.send_after(self(), :tick, 1_000)
+  {:update, Map.update!(assigns, :count, &(&1 + 1))}
 end
 ```
 
@@ -159,15 +179,19 @@ end
 
 ## エラーハンドリング
 
+`mount`・`handle_event`・`handle_info` の中で例外が発生しても GenServer はクラッシュしない。フレームワークが自動的に例外をキャッチし、エラー画面をブラウザに送信して元の state を維持する。
+
+```
+例外発生 → エラー画面をブラウザに表示 → プロセスは生存 → 次のイベントを受け付け可能
+```
+
+エラーを UI に表示したい場合は、自分で rescue して assigns に記録する：
+
 ```elixir
 def handle_event("risky_op", _value, assigns) do
-  try do
-    result = risky_operation()
-    {:update, assigns |> overwrite(%{result: result})}
-  rescue
-    e ->
-      # エラーを状態に記録
-      {:update, assigns |> overwrite(%{error: Exception.message(e)})}
+  case risky_operation() do
+    {:ok, result} -> {:update, assigns |> overwrite(%{result: result})}
+    {:error, msg} -> {:update, assigns |> overwrite(%{error: msg})}
   end
 end
 ```

@@ -151,8 +151,8 @@ end
 
 ```elixir
 def mount(_params, assigns) do
-  # PubSub のサブスクライブ
-  Phoenix.PubSub.subscribe(MyApp.PubSub, "room:lobby")
+  # subscribe/2 を使うとナビゲーション時に自動 unsubscribe される
+  subscribe(MyApp.PubSub, "room:lobby")
   {:ok, %{messages: []}}
 end
 
@@ -161,7 +161,16 @@ def handle_info({:new_message, msg}, assigns) do
 end
 ```
 
-`handle_info/2` を定義しない場合はデフォルト実装（`:noreply`）が使われる。
+`subscribe/2` で登録したトピックは別ページへのナビゲーション時にフレームワークが自動的に unsubscribe する。`handle_info/2` を定義しない場合はデフォルト実装（`:noreply`）が使われる。
+
+## エラー時の挙動
+
+`mount`・`handle_event`・`handle_info` の中で例外が発生した場合：
+
+- GenServer はクラッシュせず、プロセスは生存し続ける
+- エラー内容（メッセージ＋スタックトレース）をブラウザに表示する
+- `handle_event` / `handle_info` のエラーは元の state に戻す（assigns は変化しない）
+- `mount` のエラーはページが未確定のまま待機状態になる
 
 ## render/1
 
