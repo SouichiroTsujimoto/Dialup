@@ -86,6 +86,23 @@ end
 - 動詞＋対象の形式: `"increment"`, `"delete_item"`, `"submit_form"`
 - 一貫性を保つ（スネークケース推奨）
 
+## handle_info — サーバー起点のイベント
+
+クライアントからのイベントではなく、プロセスメッセージを受け取る場合に使用する。
+
+```elixir
+def mount(_params, assigns) do
+  Phoenix.PubSub.subscribe(MyApp.PubSub, "notifications")
+  {:ok, %{notifications: []}}
+end
+
+def handle_info({:notification, msg}, assigns) do
+  {:update, Map.update!(assigns, :notifications, &[msg | &1])}
+end
+```
+
+`handle_info/2` を定義しない場合はデフォルト実装（`:noreply`）が自動生成される。
+
 ## サーバーサイドの応答パターン
 
 ### 即座のフィードバック（:patch）
@@ -118,6 +135,27 @@ def handle_event("confirm_selection", _value, assigns) do
   {:update, assigns}
 end
 ```
+
+### リダイレクト（:redirect）
+
+イベント処理後に別URLへ遷移させる。session は保持したまま、新しいページの `mount/2` が呼ばれる。
+
+```elixir
+def handle_event("logout", _value, assigns) do
+  {:redirect, "/login", assigns}
+end
+
+def handle_event("create", params, assigns) do
+  case Posts.create(params) do
+    {:ok, post} ->
+      {:redirect, "/posts/#{post.id}", assigns}
+    {:error, errors} ->
+      {:update, Map.put(assigns, :errors, errors)}
+  end
+end
+```
+
+クライアント側の URL も自動的に更新される（`history.pushState`）。
 
 ## エラーハンドリング
 

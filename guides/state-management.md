@@ -1,111 +1,124 @@
 # State Management
 
-assignsによる状態管理の方法。
+Dialupの状態管理は `session`、`assigns`、`params` の3つに分かれている。
 
-## Assignsとは
+## 3種類の状態
 
-ページとレイアウトが保持する状態。マップ（キー・値）として表現される。
+| フィールド | 設定者 | ライフサイクル |
+|-----------|--------|----------------|
+| `session` | `layout.mount/1` | WebSocketセッション全体で持続 |
+| `assigns` | `page.mount/2` | ナビゲーションごとにリセット |
+| `params` | フレームワーク自動 | ナビゲーションごとに更新 |
+
+### session
+
+`layout.mount/1` が設定する。ページ遷移をまたいで持続するため、ログインユーザー情報などを格納する。
 
 ```elixir
-%{
-  # フレームワークが設定
-  params: %{"id" => "123"},
-  inner_content: "...",
-  
-  # ユーザーが設定
-  count: 0,
-  user: %User{...},
-  errors: []
-}
+defmodule MyApp.App.Layout do
+  use Dialup.Layout
+
+  def mount(session) do
+    user = Repo.get(User, get_user_id_from_cookie())
+    {:ok, Map.put(session, :current_user, user)}
+  end
+end
 ```
 
-## 標準的なキー
+レイアウトがネストしている場合、親レイアウトの結果が子レイアウトの `mount/1` に渡される。
 
-| キー | 設定元 | 説明 |
-|-----|-------|------|
-| `params` | Dialup | URLパラメータ |
-| `inner_content` | Dialup | レイアウト内で子要素を表示する際に使用 |
+### assigns
 
-## 状態の更新
-
-### 初期化（mount）
+`page.mount/2` が設定する。ナビゲーションのたびにリセットされ、現在のページ固有の状態を保持する。
 
 ```elixir
+defmodule MyApp.App.Users.Id do
+  use Dialup.Page
+
+  def mount(%{"id" => id}, assigns) do
+    # assigns には session の内容が入っている（current_user 等を参照可能）
+    post = Posts.get!(id, assigns.current_user)
+    {:ok, %{post: post}}  # 返り値が page assigns になる
+  end
+end
+```
+
+`mount/2` の返り値はそのまま page assigns になる（session キーを含める必要はない）。
+
+### params
+
+URLパラメータ（パスパラメータとクエリパラメータの両方）をフレームワークが自動的に設定する。
+
+```elixir
+# /users/123?tab=posts にアクセスした場合
 def mount(params, assigns) do
-  assigns
-  |> set_default(%{count: 0, items: []})    # デフォルト値を設定
-  |> overwrite(%{loaded: true})             # 特定の値で上書き
+  id  = params["id"]   # "123"（パスパラメータ）
+  tab = params["tab"]  # "posts"（クエリパラメータ）
+  ...
 end
 ```
 
-### イベント処理（handle_event）
+## テンプレートでのアクセス
+
+render 直前に `session + assigns + params` がマージされるため、テンプレートではすべて `@` でアクセスできる。どのフィールド由来かを意識する必要はない。
+
+```html
+<p>{@current_user.name}</p>  <!-- session 由来 -->
+<h1>{@post.title}</h1>       <!-- assigns 由来 -->
+<p>ページ: {@params["page"]}</p>  <!-- params -->
+```
+
+## handle_event での状態更新
+
+`handle_event/3` には `session + assigns + params` がマージされた状態が渡される。返り値も同じ形式で返す。
 
 ```elixir
-def handle_event("add", %{"name" => name}, assigns) do
-  new_item = %{id: System.unique_integer(), name: name}
-  items = [new_item | assigns.items]
-  
-  {:update, assigns |> overwrite(%{items: items})}
+def handle_event("follow", _, assigns) do
+  # assigns には current_user（session由来）も post（assigns由来）も含まれる
+  new_post = Posts.follow(assigns.post, assigns.current_user)
+  {:update, Map.put(assigns, :post, new_post)}
 end
 ```
 
-## 状態のライフサイクル
+フレームワークが `session_keys` を使って返り値を session と assigns に自動分割するため、開発者は意識不要。
 
-### 生存期間
+### session を更新する
 
-- **セッション単位**: WebSocket接続中は維持
-- **URL接頭辞単位**: 共通パス部分は維持、異なる部分は破棄
+`handle_event` の返り値に session キーを含めれば session も更新できる。
 
-```
-/users/123 → /users/123/edit
-→ usersレイヤーのstateは維持
-
-/users/123 → /items/456  
-→ usersレイヤーのstateは破棄、itemsレイヤーが新規作成
+```elixir
+def handle_event("switch_locale", locale, assigns) do
+  {:update, Map.put(assigns, :locale, locale)}
+  # :locale が session_keys に含まれていれば session が更新される
+end
 ```
 
-### 揮発性
+## ナビゲーション時の挙動
 
-assignsはメモリ上に保持される。以下の場合に失われる：
+```
+/users/123 → /users/456 に遷移
 
-- WebSocket切断後、タイムアウト時間経過
+session:  変化なし（current_user 等を保持）
+assigns:  リセット → page.mount/2 が再実行される
+params:   新しいURLのパラメータに更新
+```
+
+session をリセットしたい場合は、`handle_event` や `layout.mount` 内で明示的に行う。
+
+## 状態の揮発性
+
+assigns・session はメモリ上に保持される。以下の場合に失われる：
+
+- WebSocket切断後、タイムアウト（デフォルト5分）経過
 - サーバー再起動
 - プロセスクラッシュ
 
-永続化が必要なデータはDBなどに保存すること。
+永続化が必要なデータはDBに保存すること。
 
-## 状態設計の指針
+## 設計指針
 
-### assignsに含めるべきもの
+**session に入れるもの**: ページをまたいで共有したい状態（ログインユーザー、言語設定など）
 
-- UIの表示状態（count, loading, errors）
-- 現在表示中のデータ（user, items）
-- フォーム入力中の値（draft）
+**assigns に入れるもの**: 現在のページ固有の状態（表示中のデータ、フォーム入力、UIフラグ）
 
-### assignsに含めないべきもの
-
-- 永続化済みデータの全件（ページネーション対象）
-- セキュリティ上敏感な情報（パスワード、トークン）
-- 大きなバイナリデータ
-
-## パターンマッチの活用
-
-mount内でassignsの構造を検証：
-
-```elixir
-def mount(_params, %{current_user: nil} = assigns) do
-  # 未ログイン時の処理
-  {:ok, assigns |> overwrite(%{require_login: true})}
-end
-
-def mount(_params, %{current_user: user} = assigns) do
-  # ログイン済み時の処理
-  {:ok, assigns |> overwrite(%{profile: user.profile})}
-end
-```
-
-## 注意点
-
-- assignsは書き換え可能だが、immutabilityを保つ
-- 大きなリストはpage単位で保持し、無限スクロールなどを検討
-- メモリ使用量に注意（各タブ/ユーザーにプロセスが割り当てられる）
+**注意**: session と assigns で同じキー名を使うと session が優先される。命名の衝突を避けること。

@@ -1,105 +1,106 @@
 # Lifecycle
 
-ページのライフサイクル（mount → render → handle_event）について。
+ページのライフサイクル（mount → render → handle_event/handle_info）について。
 
 ## ライフサイクル概要
 
 ```
-初回アクセス: HTTP → mount/2 → render/1 → WebSocket接続 → mount/2
-イベント発生:            ← handle_event/3 → render/1
-ページ遷移:              ← mount/2（新ページ）→ render/1
+初回接続:   WebSocket接続 → layout.mount/1（session確定）→ page.mount/2（assigns確定）→ render
+ページ遷移: __navigate → page.mount/2（assigns リセット）→ render
+イベント:   handle_event/3 → {:update, _} なら render
+再接続:     プロセス生存中なら mount なしで現在の state で再描画
 ```
 
-## Mount
-
-### mount/2（動的ページ用）
+## layout.mount/1
 
 ```elixir
-def mount(params, assigns) :: {:ok, map()}
+def mount(session :: map()) :: {:ok, map()}
 ```
 
-- `params`: URLパラメータ（動的ルート時）または空マップ
-- `assigns`: 親レイアウトから引き継がれた状態
-- 戻り値: `{:ok, new_assigns}` で初期状態を設定
+WebSocket接続時に一度だけ呼ばれる。ページ遷移では再呼び出しされない。
+
+- `session`: 親レイアウトが設定した session（最上位レイアウトは `%{}` を受け取る）
+- 戻り値: `{:ok, new_session}` で session に追加するキーを返す
 
 ```elixir
-def mount(params, assigns) do
-  # 動的パラメータの処理
-  id = params["id"]
-  item = id && Items.get(id)
-  
-  assigns
-  |> set_default(%{count: 0, loaded: false})  # デフォルト値の設定
-  |> overwrite(%{item: item, loaded: true})   # 値を上書き
+defmodule MyApp.App.Layout do
+  use Dialup.Layout
+
+  def mount(session) do
+    user = Repo.get(User, get_user_id_from_cookie())
+    {:ok, Map.put(session, :current_user, user)}
+  end
+
+  def render(assigns) do
+    ~H"""
+    <nav>{@current_user.name}</nav>
+    <main>{raw(@inner_content)}</main>
+    """
+  end
+end
+```
+
+`mount/1` を定義しない場合はデフォルト実装（session をそのまま返す）が使われる。
+
+## page.mount/2
+
+```elixir
+def mount(params :: map(), assigns :: map()) :: {:ok, map()}
+```
+
+ナビゲーションのたびに呼ばれる。assigns は毎回リセットされてから再設定される。
+
+- `params`: URLパラメータ（パスパラメータ＋クエリパラメータ）
+- `assigns`: session の内容（`current_user` 等を参照可能）
+- 戻り値: `{:ok, new_assigns}` — 返したマップがそのまま page assigns になる
+
+```elixir
+def mount(%{"id" => id}, assigns) do
+  post = Posts.get!(id, assigns.current_user)
+  {:ok, %{post: post}}
 end
 ```
 
 ### mount/1（静的ページ用）
 
-```elixir
-def mount(assigns) :: {:ok, map()}
-```
-
-paramsが不要なページで使用。`mount/2` が自動生成される。
+params が不要なページでは `mount/1` を定義できる。`mount/2` は自動生成される。
 
 ```elixir
 def mount(assigns) do
-  {:ok, assigns |> set_default(%{count: 0})}
+  {:ok, %{items: Items.all()}}
 end
 ```
 
-### mountの呼び出しタイミング
+### mount の呼び出しタイミング
 
-| タイミング | 備考 |
-|-----------|------|
-| 初回HTTPリクエスト | SSR用に一度呼ばれる |
-| WebSocket接続確立後 | セッション初期化時 |
-| ページ遷移時 | 新しいページのモジュールで呼ばれる |
-| 再接続時 | プロセスが生存していれば呼ばれない |
+| タイミング | layout.mount | page.mount |
+|-----------|:---:|:---:|
+| 初回 WebSocket 接続 | 呼ばれる | 呼ばれる |
+| ページ遷移（ws-href） | 呼ばれない | 呼ばれる |
+| 再接続（プロセス生存中） | 呼ばれない | 呼ばれない |
+| 再接続（タイムアウト済み） | 呼ばれる | 呼ばれる |
 
-## Render
-
-```elixir
-def render(assigns) :: Phoenix.LiveView.Rendered.t()
-```
-
-HTMLを生成。`assigns` の現在値を使ってレンダリング。
-
-```elixir
-def render(assigns) do
-  ~H"""
-  <div>
-    <p>Count: {@count}</p>
-    <%= if @loaded do %>
-      <p>Loaded!</p>
-    <% end %>
-  </div>
-  """
-end
-```
-
-### レンダリングのタイミング
-
-- mount直後
-- handle_eventで `{:update, _}` または `{:patch, _, _, _}` を返した後
-
-## Handle Event
+## handle_event/3
 
 ```elixir
 def handle_event(event :: String.t(), value :: any(), assigns :: map()) ::
-  {:noreply, map()} | {:update, map()} | {:patch, String.t(), any(), map()}
+  {:noreply, map()} | {:update, map()} |
+  {:patch, String.t(), any(), map()} | {:redirect, String.t(), map()}
 ```
 
-### 返り値の種類
+`assigns` には `session + assigns + params` がマージされた状態が渡される。
+
+### 返り値
 
 | 返り値 | 動作 |
 |-------|------|
 | `{:noreply, assigns}` | 状態のみ更新、再描画なし |
 | `{:update, assigns}` | 全体を再描画 |
 | `{:patch, target_id, html, assigns}` | 指定IDの要素のみ更新 |
+| `{:redirect, path, assigns}` | 別URLへ遷移（session保持、assigns リセット） |
 
 ```elixir
-# 状態のみ更新（リアルタイム入力同期など）
+# 再描画なし（頻繁なイベントに）
 def handle_event("draft", value, assigns) do
   {:noreply, Map.put(assigns, :draft, value)}
 end
@@ -118,29 +119,69 @@ def handle_event("inc", _value, assigns) do
   new_assigns = Map.update!(assigns, :count, &(&1 + 1))
   {:patch, "counter", render_counter(new_assigns), new_assigns}
 end
+
+# 別ページへリダイレクト
+def handle_event("logout", _value, assigns) do
+  {:redirect, "/login", Map.delete(assigns, :current_user)}
+end
 ```
 
-## 状態の継続と破棄
+## handle_info/2
 
-### ページ遷移時の状態
-
-```
-/users/123 → /users/123/edit
-```
-
-- `/users` レイアウトの state: **継続**
-- `[id]` ページの state: **継続**
-- 新しいページの state: **新規作成**
-
-```
-/users/123 → /items/456
+```elixir
+def handle_info(msg :: any(), assigns :: map()) ::
+  {:noreply, map()} | {:update, map()} |
+  {:patch, String.t(), any(), map()} | {:redirect, String.t(), map()}
 ```
 
-- `/users` レイアウトの state: **破棄**
-- `/items` レイアウトの state: **新規作成**
+`Process.send_after/3` や `Phoenix.PubSub` などからのメッセージを受け取る。返り値は `handle_event/3` と同じ。
 
-### 注意点
+```elixir
+def mount(_params, assigns) do
+  # 5秒ごとにリフレッシュ
+  Process.send_after(self(), :refresh, 5_000)
+  {:ok, %{data: Data.fetch()}}
+end
 
-- 親レイアウトの変更は子ページに反映される
-- プロセスクラッシュ時はmountから再開
-- 永続化が必要なデータはDBに保存
+def handle_info(:refresh, assigns) do
+  Process.send_after(self(), :refresh, 5_000)
+  {:update, Map.put(assigns, :data, Data.fetch())}
+end
+```
+
+```elixir
+def mount(_params, assigns) do
+  # PubSub のサブスクライブ
+  Phoenix.PubSub.subscribe(MyApp.PubSub, "room:lobby")
+  {:ok, %{messages: []}}
+end
+
+def handle_info({:new_message, msg}, assigns) do
+  {:update, Map.update!(assigns, :messages, &[msg | &1])}
+end
+```
+
+`handle_info/2` を定義しない場合はデフォルト実装（`:noreply`）が使われる。
+
+## render/1
+
+```elixir
+def render(assigns) :: Phoenix.LiveView.Rendered.t()
+```
+
+`assigns` の現在値を使ってHTMLを生成する。`~H` シジルまたは `.html.heex` ファイルを使用。
+
+```elixir
+def render(assigns) do
+  ~H"""
+  <div>
+    <p>Count: {@count}</p>
+    <%= if @loaded do %>
+      <p>Loaded!</p>
+    <% end %>
+  </div>
+  """
+end
+```
+
+**注意**: `~H` はローカル変数を直接参照できない（HEExのchange tracking制約）。必ず `assigns` を引数に取る関数内で使用し、`@field_name` でアクセスすること。

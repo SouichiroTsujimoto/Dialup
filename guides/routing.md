@@ -45,19 +45,38 @@ app/posts/[slug]/page.ex  → /posts/hello-world など
 
 ### paramsへのアクセス
 
-`mount/2` の第1引数で受け取る：
+`mount/2` の第1引数で受け取る。パスパラメータとクエリパラメータが両方含まれる：
 
 ```elixir
 defmodule MyApp.Users.Id do
   use Dialup.Page
 
+  # /users/123?tab=posts にアクセス
   def mount(params, assigns) do
-    id = params["id"]        # "123"
+    id  = params["id"]    # "123"（パスパラメータ）
+    tab = params["tab"]   # "posts"（クエリパラメータ）
     user = Users.get!(id)
-    {:ok, assigns |> overwrite(%{user: user})}
+    {:ok, %{user: user, tab: tab || "profile"}}
   end
 end
 ```
+
+テンプレートからは `@params` でもアクセスできる：
+
+```html
+<p>現在のタブ: {@params["tab"]}</p>
+```
+
+### クエリパラメータ
+
+クエリ文字列（`?key=value`）は自動的に `params` に含まれる。複数パラメータにも対応：
+
+```
+/search?q=elixir&page=2&sort=date
+→ params = %{"q" => "elixir", "page" => "2", "sort" => "date"}
+```
+
+パスパラメータとクエリパラメータで同名のキーがある場合、パスパラメータが優先される。
 
 ### パターンマッチ
 
