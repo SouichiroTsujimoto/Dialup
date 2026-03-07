@@ -6,6 +6,7 @@ const Dialup = (() => {
     let reconnectAttempts = 0;
     let reconnectTimer = null;
     let hooks = {};
+    let transitions = true;
 
     function send(event, value) {
         if (socket && socket.readyState === WebSocket.OPEN) {
@@ -18,6 +19,26 @@ const Dialup = (() => {
         const root = document.getElementById("dialup-root");
         if (root) {
             Idiomorph.morph(root, html, { morphStyle: "innerHTML" });
+        }
+    }
+
+    // ナビゲーション時はトップへスクロール、View Transitions でアニメーション
+    function applyUpdate(html, path, pushEvent, payload) {
+        const isNavigation = path !== currentPath;
+
+        const doApply = () => {
+            applyHtml(html);
+            if (isNavigation) window.scrollTo(0, 0);
+            if (pushEvent) {
+                const handler = hooks[pushEvent];
+                if (handler) handler(payload ?? {});
+            }
+        };
+
+        if (transitions && document.startViewTransition) {
+            document.startViewTransition(doApply);
+        } else {
+            doApply();
         }
     }
 
@@ -114,22 +135,16 @@ const Dialup = (() => {
                 if (el) Idiomorph.morph(el, msg.html);
 
             } else if (msg.html !== undefined && msg.path !== undefined) {
-                // #dialup-root 全体を差し替え
-                applyHtml(msg.html);
-
+                // history と currentPath を更新してから applyUpdate へ
                 if (msg.path !== currentPath) {
                     if (!isPopstateNavigation) {
                         history.pushState({ path: msg.path }, "", msg.path);
                     }
-                    currentPath = msg.path;
                 }
                 isPopstateNavigation = false;
 
-                // HTML適用後にJSフックを呼ぶ（更新済みDOMにアクセスできる）
-                if (msg.push_event) {
-                    const handler = hooks[msg.push_event];
-                    if (handler) handler(msg.payload ?? {});
-                }
+                applyUpdate(msg.html, msg.path, msg.push_event, msg.payload);
+                currentPath = msg.path;
             }
         };
 
@@ -152,6 +167,7 @@ const Dialup = (() => {
 
     function connect(opts = {}) {
         hooks = opts.hooks ?? {};
+        transitions = opts.transitions ?? true;
         currentPath = window.location.pathname;
         history.replaceState({ path: currentPath }, "", currentPath);
         setupPopstate();
