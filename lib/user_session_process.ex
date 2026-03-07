@@ -146,8 +146,15 @@ defmodule Dialup.UserSessionProcess do
   end
 
   # ホットリロード：ファイル変更時に現在の state で再描画
+  @impl GenServer
   def handle_info(:dialup_reload, state) do
-    {:noreply, update_page(state)}
+    try do
+      {:noreply, update_page(state)}
+    rescue
+      e ->
+        send_error(state, e, __STACKTRACE__)
+        {:noreply, state}
+    end
   end
 
   # WebSocketプロセスが落ちたら即死せず、タイムアウトまで生存する
