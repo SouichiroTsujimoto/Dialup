@@ -31,6 +31,14 @@ defmodule Dialup.Page do
     Map.merge(defaults, assigns)
   end
 
+  # mount/2 内で呼ぶことでナビゲーション時の自動 unsubscribe が有効になる
+  def subscribe(pubsub, topic) do
+    Phoenix.PubSub.subscribe(pubsub, topic)
+    subs = Process.get(:dialup_subscriptions, [])
+    Process.put(:dialup_subscriptions, [{pubsub, topic} | subs])
+    :ok
+  end
+
   defmacro __using__(_opts) do
     quote do
       @behaviour Dialup.Page
@@ -39,7 +47,7 @@ defmodule Dialup.Page do
       import Phoenix.HTML, only: [raw: 1]
 
       # ローカルでの使用も可能に（import）
-      import Dialup.Page, only: [overwrite: 2, set_default: 2]
+      import Dialup.Page, only: [overwrite: 2, set_default: 2, subscribe: 2]
 
       # デフォルト実装
       def handle_event(_event, _value, assigns), do: {:noreply, assigns}

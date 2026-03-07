@@ -36,6 +36,8 @@ defmodule Dialup.UserSessionProcess do
        assigns: %{},
        # 現在のURLパラメータ（framework が自動設定）
        params: %{},
+       # 現在のページが subscribe 中の PubSub トピック（ナビゲーション時に自動 unsubscribe）
+       subscriptions: [],
        monitor_ref: ref,
        timeout_ref: nil
      }}
@@ -46,9 +48,11 @@ defmodule Dialup.UserSessionProcess do
   def handle_cast({:init, path}, state) do
     try do
       params = state.app_module.path_params(path)
+      Process.put(:dialup_subscriptions, [])
       {session, session_keys} = mount_session(path, state.app_module)
       assigns = mount_page(path, params, session, session_keys, state.app_module)
-      {:noreply, %{state | path: path, params: params, session: session, session_keys: session_keys, assigns: assigns}}
+      subs = Process.get(:dialup_subscriptions, [])
+      {:noreply, %{state | path: path, params: params, session: session, session_keys: session_keys, assigns: assigns, subscriptions: subs}}
     rescue
       e ->
         new_state = %{state | path: path}
@@ -62,10 +66,12 @@ defmodule Dialup.UserSessionProcess do
   def handle_cast({:reconnect, path}, state) do
     if state.path == nil do
       try do
+        Process.put(:dialup_subscriptions, [])
         params = state.app_module.path_params(path)
         {session, session_keys} = mount_session(path, state.app_module)
         assigns = mount_page(path, params, session, session_keys, state.app_module)
-        new_state = update_page(%{state | path: path, params: params, session: session, session_keys: session_keys, assigns: assigns})
+        subs = Process.get(:dialup_subscriptions, [])
+        new_state = update_page(%{state | path: path, params: params, session: session, session_keys: session_keys, assigns: assigns, subscriptions: subs})
         {:noreply, new_state}
       rescue
         e ->
@@ -185,9 +191,16 @@ defmodule Dialup.UserSessionProcess do
   # session を保持しつつ新しいパスに遷移する（navigate / redirect 共通）
   defp do_navigate(path, state) do
     try do
+      # 前のページのサブスクリプションを解除
+      Enum.each(state.subscriptions, fn {pubsub, topic} ->
+        Phoenix.PubSub.unsubscribe(pubsub, topic)
+      end)
+
+      Process.put(:dialup_subscriptions, [])
       params = state.app_module.path_params(path)
       assigns = mount_page(path, params, state.session, state.session_keys, state.app_module)
-      update_page(%{state | path: path, params: params, assigns: assigns})
+      subs = Process.get(:dialup_subscriptions, [])
+      update_page(%{state | path: path, params: params, assigns: assigns, subscriptions: subs})
     rescue
       e ->
         new_state = %{state | path: path}
