@@ -27,6 +27,8 @@ defmodule Dialup do
     port = Keyword.get(opts, :port, 4000)
 
     children = [
+      {Registry, keys: :unique, name: Dialup.SessionRegistry},
+      {DynamicSupervisor, name: Dialup.SessionSupervisor, strategy: :one_for_one},
       {Bandit, plug: {Dialup.Server, app: app_module}, port: port}
     ]
 

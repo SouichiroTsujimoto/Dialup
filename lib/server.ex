@@ -18,13 +18,26 @@ defmodule Dialup.Server do
   # WebSocket upgrade endpoint
   get "/ws" do
     app_module = conn.private[:dialup_app]
+    conn = Plug.Conn.fetch_cookies(conn)
 
-    conn
-    |> WebSockAdapter.upgrade(Dialup.WebSocket, %{app_module: app_module}, timeout: :infinity)
-    |> halt()
+    case conn.cookies["dialup_session"] do
+      nil ->
+        send_resp(conn, 403, "No session")
+
+      session_id ->
+        conn
+        |> WebSockAdapter.upgrade(
+          Dialup.WebSocket,
+          %{app_module: app_module, session_id: session_id},
+          timeout: :infinity
+        )
+        |> halt()
+    end
   end
 
   get _ do
+    conn = Plug.Conn.fetch_cookies(conn)
+    {conn, _session_id} = ensure_session_id(conn)
     path = conn.request_path
     app_module = conn.private[:dialup_app]
 
@@ -52,6 +65,18 @@ defmodule Dialup.Server do
     conn
     |> put_resp_content_type("text/html")
     |> send_resp(200, shell)
+  end
+
+  defp ensure_session_id(conn) do
+    case conn.cookies["dialup_session"] do
+      nil ->
+        id = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
+        conn = Plug.Conn.put_resp_cookie(conn, "dialup_session", id, http_only: true, same_site: "Lax")
+        {conn, id}
+
+      id ->
+        {conn, id}
+    end
   end
 
   match _ do

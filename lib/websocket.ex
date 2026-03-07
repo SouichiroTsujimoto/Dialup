@@ -1,10 +1,27 @@
 defmodule Dialup.WebSocket do
   @behaviour WebSock
 
-  # WebSocket接続確立時、GenServerを起動してPIDをstateに保存
+  # WebSocket接続確立時、既存セッションを引き継ぐか新規プロセスを起動する
   @impl WebSock
-  def init(%{app_module: app_module}) do
-    {:ok, session_pid} = Dialup.UserSessionProcess.start_link(self(), app_module)
+  def init(%{app_module: app_module, session_id: session_id}) do
+    session_pid =
+      case Registry.lookup(Dialup.SessionRegistry, session_id) do
+        [{pid, _}] ->
+          # 既存プロセスが生存中 → socket_pidだけ更新して引き継ぐ
+          Dialup.UserSessionProcess.take_over(pid, self())
+          pid
+
+        [] ->
+          # プロセスが存在しない（初回 or タイムアウト済み）→ 新規起動
+          {:ok, pid} =
+            DynamicSupervisor.start_child(
+              Dialup.SessionSupervisor,
+              {Dialup.UserSessionProcess, {self(), app_module, session_id}}
+            )
+
+          pid
+      end
+
     {:ok, %{session_pid: session_pid}}
   end
 
@@ -14,6 +31,10 @@ defmodule Dialup.WebSocket do
     case Jason.decode(text) do
       {:ok, %{"event" => "__init", "value" => path}} ->
         Dialup.UserSessionProcess.init_session(state.session_pid, path)
+        {:ok, state}
+
+      {:ok, %{"event" => "__reconnect", "value" => path}} ->
+        Dialup.UserSessionProcess.reconnect(state.session_pid, path)
         {:ok, state}
 
       {:ok, %{"event" => "__navigate", "value" => path}} ->

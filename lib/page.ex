@@ -1,19 +1,25 @@
 defmodule Dialup.Page do
   @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t()
 
+  # params: URLパラメータ
+  # assigns: session の内容（current_user 等を読み取り可能）
+  # 返り値の map が page assigns になる（session キーは自動的に除外される）
   @callback mount(params :: map(), assigns :: map()) :: {:ok, map()}
   @callback mount(assigns :: map()) :: {:ok, map()}
 
   # 再描画なし（状態のみ更新）
   @callback handle_event(event :: binary(), value :: any(), assigns :: map()) ::
               {:noreply, map()}
-              # 全体再描画
               | {:update, map()}
-              # 部分re-render（target: DOM要素のid、rendered: ~H または binary）
               | {:patch, target :: binary(), rendered :: any(), map()}
 
-  # mount/1 はオプショナル（静的ページ用）
-  @optional_callbacks mount: 1
+  @callback handle_info(msg :: any(), assigns :: map()) ::
+              {:noreply, map()}
+              | {:update, map()}
+              | {:patch, target :: binary(), rendered :: any(), map()}
+
+  # mount/1, handle_info はオプショナル
+  @optional_callbacks mount: 1, handle_info: 2
 
   def overwrite(assigns, overwrite) when is_map(assigns) and is_map(overwrite) do
     Map.merge(assigns, overwrite)
@@ -33,11 +39,11 @@ defmodule Dialup.Page do
       # ローカルでの使用も可能に（import）
       import Dialup.Page, only: [overwrite: 2, set_default: 2]
 
-      # デフォルト実装（handle_eventのみ）
+      # デフォルト実装
       def handle_event(_event, _value, assigns), do: {:noreply, assigns}
+      def handle_info(_msg, assigns), do: {:noreply, assigns}
 
-      # mountはdefoverridableにせず、@before_compileで適切なデフォルトを生成
-      defoverridable handle_event: 3
+      defoverridable handle_event: 3, handle_info: 2
 
       @before_compile Dialup.Page
     end

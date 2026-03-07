@@ -133,6 +133,19 @@ defmodule Dialup.Router do
       @doc false
       def __routes__, do: @routes
 
+      def layouts_for(path) do
+        case Map.get(@static_routes, path) do
+          nil ->
+            case match_dynamic_route(path) do
+              nil -> []
+              {_, info} -> info.layouts
+            end
+
+          %{layouts: layouts} ->
+            layouts
+        end
+      end
+
       def page_for(path) do
         case Map.get(@static_routes, path) do
           nil ->

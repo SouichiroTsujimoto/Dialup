@@ -1,8 +1,10 @@
 const Dialup = (() => {
     let socket = null;
     let currentPath = null;
-    // redo/undo による遷移かどうかのフラグ
     let isPopstateNavigation = false;
+    let isReconnecting = false;
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
 
     function send(event, value) {
         if (socket && socket.readyState === WebSocket.OPEN) {
@@ -82,20 +84,24 @@ const Dialup = (() => {
         if (el) el.textContent = text;
     }
 
-    function connect() {
-        const initialPath = window.location.pathname;
-        currentPath = initialPath;
-
-        history.replaceState({ path: initialPath }, "", initialPath);
-
+    function connectSocket() {
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
         const url = `${proto}//${location.host}/ws`;
 
         socket = new WebSocket(url);
 
         socket.onopen = () => {
-            setStatus("接続済み ✓");
-            send("__init", currentPath);
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            reconnectAttempts = 0;
+
+            if (isReconnecting) {
+                setStatus("再接続しました ✓");
+                send("__reconnect", currentPath);
+                isReconnecting = false;
+            } else {
+                setStatus("接続済み ✓");
+                send("__init", currentPath);
+            }
         };
 
         socket.onmessage = (e) => {
@@ -121,15 +127,28 @@ const Dialup = (() => {
         };
 
         socket.onclose = () => {
-            setStatus("切断されました。再読み込みしてください。");
+            isReconnecting = true;
+            scheduleReconnect();
         };
 
-        socket.onerror = () => {
-            setStatus("接続エラー");
-        };
+        // onerror の後は必ず onclose が発火するため、ここでは何もしない
+        socket.onerror = () => {};
+    }
 
+    function scheduleReconnect() {
+        // 指数バックオフ: 1s → 2s → 4s → 8s → ... 最大30s
+        const delay = Math.min(1000 * (2 ** reconnectAttempts), 30000);
+        reconnectAttempts++;
+        setStatus(`再接続中... (${reconnectAttempts}回目)`);
+        reconnectTimer = setTimeout(connectSocket, delay);
+    }
+
+    function connect() {
+        currentPath = window.location.pathname;
+        history.replaceState({ path: currentPath }, "", currentPath);
         setupPopstate();
         setupDelegation();
+        connectSocket();
     }
 
     return { connect };

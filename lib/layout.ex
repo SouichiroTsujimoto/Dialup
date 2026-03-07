@@ -1,12 +1,22 @@
 defmodule Dialup.Layout do
   @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t()
 
+  # session :: 親レイアウトが設定したsession（rootレイアウトは %{} を受け取る）
+  @callback mount(session :: map()) :: {:ok, map()}
+
+  @optional_callbacks mount: 1
+
   defmacro __using__(_opts) do
     quote do
       @behaviour Dialup.Layout
 
       import Phoenix.Component
       import Phoenix.HTML, only: [raw: 1]
+      import Dialup.Page, only: [overwrite: 2, set_default: 2]
+
+      # デフォルト実装：何もしない（mountを定義しないlayoutはsessionに何も追加しない）
+      def mount(session), do: {:ok, session}
+      defoverridable mount: 1
 
       @before_compile Dialup.Layout
     end
