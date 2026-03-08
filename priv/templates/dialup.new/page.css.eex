@@ -132,7 +132,7 @@
 
 .counter-actions {
   display: flex;
-  gap: 0;
+  gap: 0.75rem;
 }
 
 .counter-note {
@@ -158,12 +158,9 @@
   transition: transform 0.08s, box-shadow 0.08s;
 }
 
-.btn + .btn {
-  border-left: none;
-}
 
 .btn:active {
-  transform: translate(2px, 2px);
+  transform: translate(4px, 4px) !important;
   box-shadow: none !important;
 }
 
