@@ -22,10 +22,8 @@ defmodule Dialup.App.Layout do
     ~H"""
     <nav class="site-nav">
       <div class="nav-inner">
-        <span class="nav-logo" ws-href="/">⚡ My App</span>
-        <div class="nav-links">
-          <span ws-href="/">Home</span>
-        </div>
+        <span class="nav-logo" ws-href="/"><%= mod %></span>
+        <span id="ws-status" class="ws-lamp" title="WebSocket status"></span>
       </div>
     </nav>
 

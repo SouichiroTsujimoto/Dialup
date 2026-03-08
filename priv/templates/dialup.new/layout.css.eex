@@ -4,15 +4,15 @@
 & {
   --black: #000000;
   --white: #ffffff;
-  --accent: #ffe500;
-  --accent-dark: #e6ce00;
+  --accent: #77ff00;
+  --accent-dark: #95ff00;
   --ink: #1a1a1a;
   --shadow: 4px 4px 0 var(--black);
   --border: 3px solid var(--black);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: serif, -apple-system, BlinkMacSystemFont, 'Segoe UI';
   color: var(--ink);
   background: var(--white);
-  min-height: 100%;
+  min-height: 100svh;
   display: flex;
   flex-direction: column;
 }
@@ -28,6 +28,7 @@
   background: var(--black);
   border-bottom: var(--border);
   flex-shrink: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .nav-inner {
@@ -46,24 +47,32 @@
   border-right: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.nav-links {
+/* ── Connection lamp ── */
+.ws-lamp {
   display: flex;
+  align-items: center;
+  padding: 0 1.5rem;
+  font-size: 0;
 }
 
-.nav-links [ws-href] {
-  color: rgba(255, 255, 255, 0.6);
-  padding: 1rem 1.5rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-  transition: background 0.1s, color 0.1s;
+.ws-lamp::after {
+  content: '';
+  display: block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #444;
+  transition: background 0.3s;
 }
 
-.nav-links [ws-href]:hover {
-  background: rgba(255, 229, 0, 0.1);
-  color: var(--accent);
+.ws-lamp[data-ws-state="connected"]::after {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.ws-lamp[data-ws-state="disconnected"]::after {
+  background: #ff3b3b;
+  box-shadow: 0 0 6px #ff3b3b;
 }
 
 /* ── Page content ── */
@@ -77,8 +86,9 @@
 .site-footer {
   border-top: var(--border);
   padding: 1rem 2rem;
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--ink);
@@ -86,7 +96,7 @@
 }
 
 .site-footer a {
-  color: var(--ink);
+  color: var(--black);
   text-decoration: underline;
   text-underline-offset: 3px;
 }

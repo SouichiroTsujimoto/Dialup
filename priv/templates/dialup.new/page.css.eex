@@ -8,107 +8,147 @@
   flex-direction: column;
 }
 
-/* ── Hero (fills remaining viewport) ── */
+/* ── Hero: left (text) / right (demo) ── */
 .hero {
   flex: 1;
-  background: var(--accent);
-  border-bottom: var(--border);
-  display: flex;
-  align-items: center;
-  padding: 5rem 6%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
 }
 
-.hero-inner {
-  width: 100%;
-  max-width: 960px;
+/* Left column */
+.hero-text {
+  background: var(--white);
+  border-right: var(--border);
+  padding: 5rem 6%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.hero-eyebrow {
+  font-size: clamp(1.0rem, 1.5vw, 10rem);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #333;
+  margin: 0 0 1.25rem;
+  font-family: 'Courier New', Courier, monospace;
 }
 
 .hero h1 {
-  font-size: clamp(3.5rem, 10vw, 8rem);
+  font-size: clamp(3.5rem, 9vw, 10vh);
   font-weight: 900;
   line-height: 0.92;
-  letter-spacing: -4px;
-  text-transform: uppercase;
-  margin: 0 0 2rem;
+  margin: 0 0 1.75rem;
   color: var(--black);
 }
 
 .brand {
   display: inline;
-  background: var(--black);
-  color: var(--accent);
-  padding: 0 0.2em;
+  padding: 0em 0.1em 0.1em 0.1em;
+  border: 0.1rem solid var(--black);
+  background: var(--accent);
+  color: var(--black);
 }
 
 .hero-sub {
-  font-size: clamp(0.95rem, 1.5vw, 1.15rem);
+  font-size: clamp(2.0rem, 2.0vw, 2.5rem);
   font-weight: 500;
-  color: var(--black);
-  margin: 0 0 3.5rem;
-  max-width: 480px;
+  color: #1a1a1a;
+  margin-top: 3vw;
+  margin-bottom: 2.5rem;
   border-left: 4px solid var(--black);
-  padding-left: 1rem;
-  line-height: 1.5;
+  padding-left: 0.5rem;
+  line-height: 1.4;
+}
+
+.hint-container {
+  text-align: center;
 }
 
 .hint {
-  margin-top: 3rem;
-  font-size: 0.8rem;
+  display: inline-block;
+  font-size: clamp(0.8rem, 2.0vw, 1.2rem);
   font-family: 'Courier New', Courier, monospace;
-  color: #333;
+  color: var(--black);
+  background: var(--white);
+  padding: 1rem 1.2rem;
   font-weight: 600;
+  border: 1px solid var(--black);
+  border-radius: 0.5rem;
 }
 
 .hint code {
-  background: rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: var(--accent);
+  border: 1px solid var(--black);
   padding: 0.1em 0.45em;
   font-family: inherit;
 }
 
-/* ── Counter card ── */
-.counter-card {
-  display: inline-block;
-  border: var(--border);
-  box-shadow: var(--shadow);
-  padding: 2.25rem 3rem;
+/* Right column — white demo area */
+.hero-demo {
   background: var(--white);
-  text-align: center;
-  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 4rem 6%;
 }
 
-.counter-label {
+/* ── Responsive ── */
+@media (max-width: 80rem) {
+  .hero {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+}
+
+/* ── Counter card ── */
+.counter-card {
+  width: 100%;
+}
+
+.counter-eyebrow {
   font-size: 0.65rem;
-  font-weight: 900;
-  letter-spacing: 0.2em;
+  font-weight: 700;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
-  color: #555;
+  color: #888;
   margin: 0 0 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid #e5e5e5;
   font-family: 'Courier New', Courier, monospace;
 }
 
 .counter-value {
-  font-size: 6rem;
+  font-size: clamp(5rem, 10vw, 9rem);
   font-weight: 900;
   color: var(--black);
   line-height: 1;
-  margin: 0 0 1.75rem;
+  margin: 0.25rem 0 1.5rem;
   font-family: 'Courier New', Courier, monospace;
-  letter-spacing: -4px;
+  letter-spacing: -6px;
 }
 
 .counter-actions {
   display: flex;
   gap: 0;
-  justify-content: center;
+}
+
+.counter-note {
+  font-size: 0.7rem;
+  color: #aaa;
+  margin: 1rem 0 0;
+  font-family: 'Courier New', Courier, monospace;
 }
 
 /* ── Buttons ── */
 .btn {
+  flex: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.75rem 1.6rem;
+  padding: 0.9rem 1rem;
   border: var(--border);
   font-size: 0.8rem;
   font-weight: 900;
@@ -149,3 +189,4 @@
   box-shadow: 6px 6px 0 var(--black);
   transform: translate(-1px, -1px);
 }
+

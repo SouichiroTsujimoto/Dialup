@@ -101,12 +101,12 @@ const Dialup = (() => {
         });
     }
 
-    function setStatus(text) {
+    function setConnectionState(connected) {
         const el = document.getElementById("ws-status");
-        if (el) el.textContent = text;
+        if (el) el.dataset.wsState = connected ? "connected" : "disconnected";
     }
 
-    function connectSocket() {
+    function connectSocket(opts = {}) {
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
         const url = `${proto}//${location.host}/ws`;
 
@@ -115,13 +115,14 @@ const Dialup = (() => {
         socket.onopen = () => {
             if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
             reconnectAttempts = 0;
+            setConnectionState(true);
 
             if (isReconnecting) {
-                setStatus("再接続しました ✓");
+                if (opts.onReconnect) opts.onReconnect();
                 send("__reconnect", currentPath);
                 isReconnecting = false;
             } else {
-                setStatus("接続済み ✓");
+                if (opts.onConnect) opts.onConnect();
                 send("__init", currentPath);
             }
         };
@@ -150,19 +151,20 @@ const Dialup = (() => {
 
         socket.onclose = () => {
             isReconnecting = true;
-            scheduleReconnect();
+            scheduleReconnect(opts);
         };
 
         // onerror の後は必ず onclose が発火するため、ここでは何もしない
         socket.onerror = () => {};
     }
 
-    function scheduleReconnect() {
+    function scheduleReconnect(opts) {
         // 指数バックオフ: 1s → 2s → 4s → 8s → ... 最大30s
         const delay = Math.min(1000 * (2 ** reconnectAttempts), 30000);
         reconnectAttempts++;
-        setStatus(`再接続中... (${reconnectAttempts}回目)`);
-        reconnectTimer = setTimeout(connectSocket, delay);
+        setConnectionState(false);
+        if (opts.onDisconnect) opts.onDisconnect(reconnectAttempts);
+        reconnectTimer = setTimeout(() => connectSocket(opts), delay);
     }
 
     function connect(opts = {}) {
@@ -172,7 +174,7 @@ const Dialup = (() => {
         history.replaceState({ path: currentPath }, "", currentPath);
         setupPopstate();
         setupDelegation();
-        connectSocket();
+        connectSocket(opts);
     }
 
     return { connect, send };

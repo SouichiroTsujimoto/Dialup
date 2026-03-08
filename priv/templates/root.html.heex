@@ -2,9 +2,12 @@
 <html lang="{@lang}">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{@title}</title>
   <style>
-    body { font-family: sans-serif; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; max-width: none; height: 100%; font-family: sans-serif; }
+    #dialup-root { height: 100%; }
     #ws-status { font-size: 0.8rem; color: gray; }
     [ws-href] { color: #0066cc; text-decoration: underline; cursor: pointer; }
     [ws-href]:hover { color: #b600daff; }

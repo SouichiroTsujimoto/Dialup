@@ -26,15 +26,19 @@ defmodule Dialup.App.Root do
   def render(assigns) do
     ~H"""
     <section class="hero">
-      <div class="hero-inner">
+      <div class="hero-text">
+        <p class="hero-eyebrow">Elixir · WebSocket · Real-time</p>
         <h1>Welcome to <span class="brand">Dialup</span></h1>
         <p class="hero-sub">
-          A WebSocket-first Elixir framework — 1 tab, 1 process, real-time UI.
+          1 tab = 1 Elixir process.<br/>
+          State lives on the server, synced over WebSocket.
         </p>
+        <div class="hint-container">
+          <p class="hint">💡 Edit <code>lib/app/page.ex</code> + <code>lib/app/page.css</code></p>
+        </div>
+      </div>
+      <div class="hero-demo">
         <%= "<%=" %> render_counter(assigns) %>
-        <p class="hint">
-          Edit <code>lib/app/page.ex</code> and <code>lib/app/page.css</code> to get started.
-        </p>
       </div>
     </section>
     """
@@ -43,12 +47,13 @@ defmodule Dialup.App.Root do
   defp render_counter(assigns) do
     ~H"""
     <div id="counter" class="counter-card">
-      <p class="counter-label">Server-side count</p>
+      <p class="counter-eyebrow">Live Demo — WebSocket Counter</p>
       <div class="counter-value">{@count}</div>
       <div class="counter-actions">
         <button class="btn btn-primary" ws-event="increment">＋ Increment</button>
         <button class="btn btn-ghost" ws-event="reset">Reset</button>
       </div>
+      <p class="counter-note">Each click reaches the server via WebSocket</p>
     </div>
     """
   end

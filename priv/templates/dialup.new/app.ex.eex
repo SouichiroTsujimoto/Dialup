@@ -8,8 +8,7 @@ defmodule <%= mod %> do
   use Dialup,
     app_dir: __DIR__ <> "/app",
     title: "<%= mod %>",
-    lang: "en",
-    head_extra: ~s(<meta name="viewport" content="width=device-width, initial-scale=1"><style>*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0;max-width:none;height:100%}#dialup-root{height:100%}</style>)
+    lang: "en"
 
   @impl Application
   def start(_type, _args) do
