@@ -1,4 +1,5 @@
 defmodule Dialup.Server do
+  @moduledoc false
   use Plug.Router
 
   plug(Plug.Static, at: "/", from: {:dialup, "priv/static"})

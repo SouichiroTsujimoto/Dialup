@@ -1,4 +1,5 @@
 defmodule Dialup.WebSocket do
+  @moduledoc false
   @behaviour WebSock
 
   # WebSocket接続確立時、既存セッションを引き継ぐか新規プロセスを起動する

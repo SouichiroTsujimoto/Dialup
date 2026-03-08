@@ -1,4 +1,67 @@
 defmodule Dialup do
+  @moduledoc """
+  Dialup is a WebSocket-first, file-based routing framework for Elixir.
+
+  Each browser tab gets its own Elixir process (`Dialup.UserSessionProcess`), and all
+  user interactions flow through that process via WebSocket. The server renders HTML and
+  sends it to the client, where [idiomorph](https://github.com/bigskysoftware/idiomorph)
+  morphs the DOM efficiently.
+
+  ## Setup
+
+  Add `use Dialup` to your Application module:
+
+      defmodule MyApp do
+        use Application
+
+        use Dialup,
+          app_dir: __DIR__ <> "/app",
+          title: "My App",
+          lang: "en"
+
+        @impl Application
+        def start(_type, _args) do
+          children = [{Dialup, app: __MODULE__, port: 4000}]
+          Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
+        end
+      end
+
+  ## Options for `use Dialup`
+
+  - `:app_dir` — **(required)** path to the directory containing `page.ex` / `layout.ex` files.
+    Typically `__DIR__ <> "/app"`.
+  - `:title` — default `<title>` value used when `page_title/1` returns `nil`.
+    Defaults to `"Dialup App"`.
+  - `:lang` — value for the `html lang` attribute. Defaults to `"en"`.
+  - `:check_origin` — WebSocket origin validation. `:conn` (default) validates against the
+    HTTP host, `false` disables validation, or a list of allowed hosts.
+  - `:plugs` — list of additional `Plug` modules inserted into the HTTP pipeline (e.g. auth).
+  - `:session_store` — `:memory` (default) or `:ets`. Use `:ets` to persist session state
+    across process restarts.
+
+  ## Child spec
+
+  `Dialup` implements `child_spec/1` and `start_link/1`, so you can add it directly to a
+  supervision tree:
+
+      children = [{Dialup, app: MyApp, port: 4000}]
+
+  ## File-based routing
+
+  Files placed under `app_dir` are automatically compiled into a route table at build time:
+
+      app/
+      ├── layout.ex        # root layout
+      ├── page.ex          # route: /
+      ├── error.ex         # error page
+      └── blog/
+          ├── layout.ex    # nested layout for /blog/*
+          └── [slug]/
+              └── page.ex  # route: /blog/:slug (dynamic)
+
+  No `router.ex` registration is required.
+  """
+
   defmacro __using__(opts) do
     app_dir = Keyword.fetch!(opts, :app_dir)
     title = Keyword.get(opts, :title, "Dialup App")

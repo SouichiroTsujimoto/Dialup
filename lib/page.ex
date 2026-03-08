@@ -1,4 +1,70 @@
 defmodule Dialup.Page do
+  @moduledoc """
+  The behaviour and macro for Dialup page modules.
+
+  A page module handles a single route. Place it at the appropriate path under your
+  `app_dir` and it will be routed automatically:
+
+      # lib/app/page.ex         → /
+      # lib/app/blog/[slug]/page.ex → /blog/:slug
+
+  ## Usage
+
+      defmodule MyApp.App.Page do
+        use Dialup.Page
+
+        def mount(_params, assigns) do
+          {:ok, Map.put(assigns, :count, 0)}
+        end
+
+        def handle_event("increment", _, assigns) do
+          {:update, Map.update!(assigns, :count, &(&1 + 1))}
+        end
+
+        def render(assigns) do
+          ~H\"\"\"
+          <h1>Count: {@count}</h1>
+          <button ws-event="increment">+1</button>
+          \"\"\"
+        end
+      end
+
+  ## Callbacks
+
+  - `mount/2` — called on every page navigation. Receives URL params and the current assigns
+    (which already include session data set by layouts). Return `{:ok, new_assigns}`.
+    Defining `mount/1` (assigns only) is also accepted as a convenience.
+  - `render/1` — renders the page HTML using HEEx.
+  - `handle_event/3` — called when a `ws-event`, `ws-submit`, or `ws-change` fires.
+  - `handle_info/2` — called for Erlang process messages (e.g. PubSub, timers).
+  - `page_title/1` — optional; return a string to set `<title>`. Return `nil` to use the
+    application default.
+
+  ## Return values for `handle_event/3` and `handle_info/2`
+
+  | Return value | Effect |
+  |---|---|
+  | `{:noreply, assigns}` | Update state, no re-render |
+  | `{:update, assigns}` | Re-render the full page |
+  | `{:patch, id, html, assigns}` | Replace only the element with the given `id` |
+  | `{:redirect, path, assigns}` | Navigate to another page (session is preserved) |
+  | `{:push_event, name, payload, assigns}` | Call a JS hook function and re-render |
+
+  ## Module attributes
+
+  - `@layout false` — disable all layout wrapping (useful for login/fullscreen pages).
+  - `@static true` — serve the page without establishing a WebSocket connection.
+
+  ## Colocation CSS
+
+  Place a `page.css` file in the same directory as `page.ex`. It is automatically scoped
+  to the page at compile time (no build tool required).
+
+  ## Helpers
+
+  `use Dialup.Page` imports `overwrite/2`, `set_default/2`, and `subscribe/2`.
+  """
+
   @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t()
 
   # params: URLパラメータ
@@ -27,15 +93,36 @@ defmodule Dialup.Page do
 
   @optional_callbacks mount: 1, handle_info: 2, page_title: 1
 
+  @doc """
+  Merges `overwrite_map` into `assigns`, replacing any existing keys.
+
+      assigns |> overwrite(%{user: user, loaded: true})
+  """
   def overwrite(assigns, overwrite) when is_map(assigns) and is_map(overwrite) do
     Map.merge(assigns, overwrite)
   end
 
+  @doc """
+  Merges `defaults` into `assigns`, keeping existing values for keys that are already set.
+
+      assigns |> set_default(%{count: 0, page: 1})
+  """
   def set_default(assigns, defaults) when is_map(assigns) and is_map(defaults) do
     Map.merge(defaults, assigns)
   end
 
-  # mount/2 内で呼ぶことでナビゲーション時の自動 unsubscribe が有効になる
+  @doc """
+  Subscribes to a `Phoenix.PubSub` topic and registers it for automatic unsubscription
+  on page navigation.
+
+  Call this inside `mount/2` to ensure the subscription is cleaned up when the user
+  navigates away.
+
+      def mount(_params, assigns) do
+        subscribe(MyApp.PubSub, "room:lobby")
+        {:ok, %{messages: []}}
+      end
+  """
   def subscribe(pubsub, topic) do
     Phoenix.PubSub.subscribe(pubsub, topic)
     subs = Process.get(:dialup_subscriptions, [])

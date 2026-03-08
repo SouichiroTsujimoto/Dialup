@@ -1,4 +1,56 @@
 defmodule Dialup.Layout do
+  @moduledoc """
+  The behaviour and macro for Dialup layout modules.
+
+  A layout wraps one or more pages with shared chrome (navigation, footer, etc.).
+  Layouts are discovered automatically based on the directory hierarchy:
+
+      app/
+      ├── layout.ex          # wraps all pages under app/
+      └── blog/
+          ├── layout.ex      # wraps all pages under app/blog/ (nested)
+          └── [slug]/
+              └── page.ex
+
+  ## Usage
+
+      defmodule MyApp.App.Layout do
+        use Dialup.Layout
+
+        # Called once when the WebSocket connection is established.
+        # Use it to set session-scoped data (e.g. the current user).
+        def mount(session) do
+          user = Repo.get(User, session[:user_id])
+          {:ok, Map.put(session, :current_user, user)}
+        end
+
+        def render(assigns) do
+          ~H\"\"\"
+          <nav>{@current_user.name}</nav>
+          <main>{raw(@inner_content)}</main>
+          \"\"\"
+        end
+      end
+
+  ## Callbacks
+
+  - `mount/1` — optional; called once when the WebSocket connection is established.
+    Receives the current session map (empty `%{}` for the root layout, or whatever the
+    parent layout returned). Return `{:ok, new_session}`.
+  - `render/1` — renders the layout HTML using HEEx. Use `{raw(@inner_content)}` to
+    inject the child content.
+
+  ## Colocation CSS
+
+  Place a `layout.css` file in the same directory as `layout.ex`. The styles are
+  automatically scoped and applied to all pages under that directory at compile time.
+
+  ## Nesting
+
+  Layout `mount/1` calls are chained from outermost to innermost. Each layout receives
+  the session returned by its parent and may enrich it further.
+  """
+
   @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t()
 
   # session :: 親レイアウトが設定したsession（rootレイアウトは %{} を受け取る）

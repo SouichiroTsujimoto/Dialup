@@ -1,4 +1,5 @@
 defmodule Dialup.UserSessionProcess do
+  @moduledoc false
   use GenServer
 
   @session_timeout :timer.minutes(5)

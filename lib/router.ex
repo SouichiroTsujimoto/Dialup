@@ -1,4 +1,5 @@
 defmodule Dialup.Router do
+  @moduledoc false
   defmacro __using__(opts) do
     app_dir = Keyword.fetch!(opts, :app_dir)
 
