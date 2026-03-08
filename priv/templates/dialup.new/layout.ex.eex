@@ -34,7 +34,7 @@ defmodule Dialup.App.Layout do
     </main>
 
     <footer class="site-footer">
-      <p>Built with <a href="https://github.com/[your-repo]/dialup">Dialup</a> · 1 tab = 1 process</p>
+      <p>Built with <a href="https://github.com/SouichiroTsujimoto/Dialup">Dialup</a> · 1 tab = 1 process</p>
     </footer>
     """
   end
