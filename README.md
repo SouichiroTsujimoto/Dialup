@@ -2,20 +2,20 @@
 
 WebSocket-first, file-based routing Elixir framework.
 
-## 概要
+## Overview
 
-Dialupは、Next.jsのような開発体験でWebSocketファーストのアプリケーションを構築できるElixirフレームワークです。
+Dialup is an Elixir framework for building WebSocket-first applications with a Next.js-like developer experience.
 
-### 特徴
+### Features
 
-- **ファイルベースルーティング** - ファイル配置がそのままURLになります
-- **WebSocketファースト** - リアルタイム通信を標準でサポート
-- **サーバーサイドステート** - クライアント側の状態管理が不要
-- **シンプルなアーキテクチャ** - Phoenix/LiveViewより軽量
+- **File-based routing** — file placement maps directly to URLs
+- **WebSocket-first** — real-time communication built in
+- **Server-side state** — no client-side state management needed
+- **Simple architecture** — lighter than Phoenix/LiveView
 
-## クイックスタート
+## Quick Start
 
-### インストール
+### Installation
 
 ```elixir
 # mix.exs
@@ -26,7 +26,7 @@ def deps do
 end
 ```
 
-### 最小構成のアプリ
+### Minimal app
 
 ```elixir
 # lib/my_app.ex
@@ -66,33 +66,33 @@ defmodule MyApp.Page do
 end
 ```
 
-## ドキュメント
+## Documentation
 
-詳細なガイドは`mix docs --open`で参照してください
+Run `mix docs --open` to browse the full documentation locally.
 
-ガイドのドキュメント本体は`guides/`にあります
+Guide source files live in `guides/`:
 
-- [Getting Started](./guides/getting-started.md) - インストールと基本的な使い方
-- [Routing](./guides/routing.md) - ルーティングの詳細
-- [State Management](./guides/state-management.md) - 状態管理
-- [Lifecycle](./guides/lifecycle.md) - ページライフサイクル
-- [Events](./guides/events.md) - イベント処理
-- [Helpers](./guides/helpers.md) - ヘルパー関数
-- [Deployment](./guides/deployment.md) - デプロイ方法
-- [Fullstack Example](./guides/fullstack-example.md) - Ecto, Pubsubも用いた実践的なアプリケーション例
+- [Getting Started](./guides/getting-started.md) — installation and basic usage
+- [Routing](./guides/routing.md) — routing in depth
+- [State Management](./guides/state-management.md) — managing server-side state
+- [Lifecycle](./guides/lifecycle.md) — page lifecycle hooks
+- [Events](./guides/events.md) — handling events
+- [Helpers](./guides/helpers.md) — helper functions
+- [Deployment](./guides/deployment.md) — deploying to production
+- [Fullstack Example](./guides/fullstack-example.md) — a practical app using Ecto and PubSub
 
-## アーキテクチャ
+## Architecture
 
 ```
 Browser          Elixir Server
    |                    |
-dialup.js ←──WS──→ UserSessionProcess (1タブ = 1プロセス)
+dialup.js ←──WS──→ UserSessionProcess (1 tab = 1 process)
    |                    |
 idiomorph            render/1
                         |
                      assigns (state)
 ```
 
-## ライセンス
+## License
 
 MIT
