@@ -70,10 +70,7 @@ defmodule Dialup.Router do
                 Macro.camelize(segment)
               end
             end)
-            |> then(fn
-              [] -> ["Root"]
-              parts -> parts
-            end)
+            |> then(fn parts -> parts ++ ["Page"] end)
             |> then(fn parts -> Module.concat(["Dialup", "App"] ++ parts) end)
 
           # 親ディレクトリのレイアウトを収集

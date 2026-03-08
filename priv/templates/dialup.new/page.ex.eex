@@ -1,4 +1,4 @@
-defmodule Dialup.App.Root do
+defmodule Dialup.App.Page do
   @moduledoc """
   Home page at /.
   """
