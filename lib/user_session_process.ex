@@ -112,7 +112,7 @@ defmodule Dialup.UserSessionProcess do
 
       page_module ->
         merged = merge_for_render(state)
-        start_time = Dialup.Telemetry.event_start(event, %{path: state.path})
+        start_time = Dialup.Telemetry.event_start(event, state.path)
 
         try do
           result =
@@ -144,11 +144,11 @@ defmodule Dialup.UserSessionProcess do
                 {:noreply, new_state}
             end
 
-          Dialup.Telemetry.event_stop(start_time, event, %{path: state.path})
+          Dialup.Telemetry.event_stop(start_time, event, state.path)
           result
         rescue
           e ->
-            Dialup.Telemetry.error(e, %{path: state.path, event: event})
+            Dialup.Telemetry.event_exception(start_time, event, state.path, :error, e, __STACKTRACE__)
             send_error(state, e, __STACKTRACE__)
             {:noreply, state}
         end
@@ -250,7 +250,7 @@ defmodule Dialup.UserSessionProcess do
       result
     rescue
       e ->
-        Dialup.Telemetry.error(e, %{path: path})
+        Dialup.Telemetry.navigate_exception(start_time, path, :error, e, __STACKTRACE__)
         new_state = %{state | path: path}
         send_error(new_state, e, __STACKTRACE__)
         new_state

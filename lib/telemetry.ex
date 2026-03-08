@@ -4,44 +4,70 @@ defmodule Dialup.Telemetry do
 
   ## イベント一覧
 
-  - `[:dialup, :websocket, :connect]` -- WebSocket 接続確立
-  - `[:dialup, :websocket, :disconnect]` -- WebSocket 切断
-  - `[:dialup, :event, :start]` / `[:dialup, :event, :stop]` -- handle_event の処理
-  - `[:dialup, :navigate, :start]` / `[:dialup, :navigate, :stop]` -- ナビゲーション処理
-  - `[:dialup, :error]` -- エラー発生
+  ### WebSocket
+  - `[:dialup, :websocket, :connect]`
+  - `[:dialup, :websocket, :disconnect]`
+
+  ### イベント処理（handle_event）
+  - `[:dialup, :event, :start]`
+  - `[:dialup, :event, :stop]`
+  - `[:dialup, :event, :exception]`
+
+  ### ナビゲーション
+  - `[:dialup, :navigate, :start]`
+  - `[:dialup, :navigate, :stop]`
+  - `[:dialup, :navigate, :exception]`
   """
 
-  def websocket_connect(metadata \\ %{}) do
+  def websocket_connect(metadata) do
     :telemetry.execute([:dialup, :websocket, :connect], %{count: 1}, metadata)
   end
 
-  def websocket_disconnect(metadata \\ %{}) do
+  def websocket_disconnect(metadata) do
     :telemetry.execute([:dialup, :websocket, :disconnect], %{count: 1}, metadata)
   end
 
-  def event_start(event_name, metadata \\ %{}) do
+  @doc "handle_event 処理の開始を記録し、start_time を返す。"
+  def event_start(event_name, path) do
+    metadata = %{event: event_name, path: path}
     start_time = System.monotonic_time()
-    :telemetry.execute([:dialup, :event, :start], %{system_time: System.system_time()}, Map.put(metadata, :event, event_name))
+    :telemetry.execute([:dialup, :event, :start], %{system_time: System.system_time()}, metadata)
     start_time
   end
 
-  def event_stop(start_time, event_name, metadata \\ %{}) do
+  @doc "handle_event 処理の正常完了を記録する。"
+  def event_stop(start_time, event_name, path) do
+    metadata = %{event: event_name, path: path}
     duration = System.monotonic_time() - start_time
-    :telemetry.execute([:dialup, :event, :stop], %{duration: duration}, Map.put(metadata, :event, event_name))
+    :telemetry.execute([:dialup, :event, :stop], %{duration: duration}, metadata)
   end
 
-  def navigate_start(path, metadata \\ %{}) do
+  @doc "handle_event 処理中の例外を記録する。"
+  def event_exception(start_time, event_name, path, kind, reason, stacktrace) do
+    metadata = %{event: event_name, path: path, kind: kind, reason: reason, stacktrace: stacktrace}
+    duration = System.monotonic_time() - start_time
+    :telemetry.execute([:dialup, :event, :exception], %{duration: duration}, metadata)
+  end
+
+  @doc "ナビゲーション処理の開始を記録し、start_time を返す。"
+  def navigate_start(path) do
+    metadata = %{path: path}
     start_time = System.monotonic_time()
-    :telemetry.execute([:dialup, :navigate, :start], %{system_time: System.system_time()}, Map.put(metadata, :path, path))
+    :telemetry.execute([:dialup, :navigate, :start], %{system_time: System.system_time()}, metadata)
     start_time
   end
 
-  def navigate_stop(start_time, path, metadata \\ %{}) do
+  @doc "ナビゲーション処理の正常完了を記録する。"
+  def navigate_stop(start_time, path) do
+    metadata = %{path: path}
     duration = System.monotonic_time() - start_time
-    :telemetry.execute([:dialup, :navigate, :stop], %{duration: duration}, Map.put(metadata, :path, path))
+    :telemetry.execute([:dialup, :navigate, :stop], %{duration: duration}, metadata)
   end
 
-  def error(exception, metadata \\ %{}) do
-    :telemetry.execute([:dialup, :error], %{count: 1}, Map.put(metadata, :exception, exception))
+  @doc "ナビゲーション処理中の例外を記録する。"
+  def navigate_exception(start_time, path, kind, reason, stacktrace) do
+    metadata = %{path: path, kind: kind, reason: reason, stacktrace: stacktrace}
+    duration = System.monotonic_time() - start_time
+    :telemetry.execute([:dialup, :navigate, :exception], %{duration: duration}, metadata)
   end
 end
