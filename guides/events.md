@@ -240,6 +240,59 @@ end
 
 クライアント側の URL も自動的に更新される（`history.pushState`）。
 
+## JS ライフサイクルフック（ws-hook）
+
+地図・チャート・リッチエディタなど、外部 JS ライブラリの初期化と後片付けが必要な場合に使用する。
+
+> **設計方針**: `ws-hook` はクライアント側の動作が必要な場合のみ使用する例外的な機能。DOM の状態管理は基本的にサーバーサイドで行い、`ws-hook` は外部ライブラリとの統合に限定することを推奨。
+
+### HTML 側
+
+`id` は必須（idiomorph がノードを正しく追跡するため）。
+
+```html
+<div id="map" ws-hook="MapHook" data-lat={@lat} data-lng={@lng}></div>
+```
+
+### JS 側（lib/root.html.heex）
+
+`Dialup.connect()` の `hooks` にライフサイクルオブジェクトを渡す。登録は connect 時の一度きりで、`lib/root.html.heex` を編集する。
+
+```javascript
+Dialup.connect({
+  hooks: {
+    MapHook: {
+      mounted(el) {
+        // 要素が DOM に追加されたとき — ライブラリを初期化
+        const lat = parseFloat(el.dataset.lat);
+        const lng = parseFloat(el.dataset.lng);
+        el._map = L.map(el).setView([lat, lng], 13);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(el._map);
+      },
+      updated(el) {
+        // サーバーから data 属性が変わったとき — ライブラリを更新
+        const lat = parseFloat(el.dataset.lat);
+        const lng = parseFloat(el.dataset.lng);
+        el._map.setView([lat, lng]);
+      },
+      destroyed(el) {
+        // 要素が DOM から消える直前 — 後片付け（メモリリーク防止）
+        el._map?.remove();
+      }
+    }
+  }
+});
+```
+
+### `push_event` との使い分け
+
+| | `push_event` | `ws-hook` |
+|---|---|---|
+| 起点 | サーバーが能動的に呼ぶ | DOM の変化が自動で呼ぶ |
+| 用途 | トースト・モーダル制御など一発イベント | 外部ライブラリの初期化・破棄 |
+
+両方を組み合わせることも可能（`mounted` で初期化し、`push_event` でデータを渡すなど）。
+
 ## エラーハンドリング
 
 `mount`・`handle_event`・`handle_info` の中で例外が発生しても GenServer はクラッシュしない。フレームワークが自動的に例外をキャッチし、エラー画面をブラウザに送信して元の state を維持する。

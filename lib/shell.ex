@@ -1,28 +1,43 @@
 defmodule Dialup.Shell do
-  import Phoenix.HTML, only: [raw: 1]
+  @moduledoc false
 
-  @template Path.join([__DIR__, "..", "priv", "templates", "root.html.heex"])
-            |> Path.expand()
-  @external_resource @template
+  @framework_template Path.join([__DIR__, "..", "priv", "templates", "root.html.heex"])
+                      |> Path.expand()
 
-  @source File.read!(@template)
+  defmacro __before_compile__(env) do
+    template_path = Module.get_attribute(env.module, :_dialup_shell_path)
 
-  defp render_template(assigns) do
-    unquote(
-      EEx.compile_string(@source,
+    path =
+      if template_path && File.exists?(template_path) do
+        template_path
+      else
+        @framework_template
+      end
+
+    source = File.read!(path)
+
+    quote do
+      import Phoenix.HTML, only: [raw: 1]
+
+      require EEx
+
+      EEx.function_from_string(
+        :defp,
+        :__render_shell_template__,
+        unquote(source),
+        [:assigns],
         engine: Phoenix.LiveView.TagEngine,
-        line: 1,
-        file: @template,
+        tag_handler: Phoenix.LiveView.HTMLEngine,
         caller: __ENV__,
-        source: @source,
-        tag_handler: Phoenix.LiveView.HTMLEngine
+        file: unquote(path),
+        source: unquote(source)
       )
-    )
-  end
 
-  def render(assigns) do
-    render_template(assigns)
-    |> Phoenix.HTML.Safe.to_iodata()
-    |> IO.iodata_to_binary()
+      def __render_shell__(assigns) do
+        __render_shell_template__(assigns)
+        |> Phoenix.HTML.Safe.to_iodata()
+        |> IO.iodata_to_binary()
+      end
+    end
   end
 end

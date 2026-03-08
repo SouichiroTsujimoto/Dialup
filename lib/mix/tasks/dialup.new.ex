@@ -8,10 +8,12 @@ defmodule Mix.Tasks.Dialup.New do
 
   A project at the given PATH will be created with:
 
-    * config/config.exs - Basic configuration
     * lib/APP_NAME.ex - Application entry point
-    * lib/APP_NAME/layout.ex - Root layout
-    * lib/APP_NAME/page.ex - Home page at /
+    * lib/root.html.heex - HTML shell (customize <head>, hooks, analytics)
+    * lib/app/layout.ex / layout.css - Root layout
+    * lib/app/page.ex / page.css - Home page at /
+    * lib/app/error.ex / error.css - Error page (404, 500)
+    * priv/static/ - Static assets directory (images, fonts, favicon)
     * mix.exs - Mix project configuration
     * README.md - Project documentation
     * .gitignore - Git ignore patterns
@@ -92,6 +94,11 @@ defmodule Mix.Tasks.Dialup.New do
       File.write!(dest, content)
     end
 
+    # priv/static/ ディレクトリを生成
+    static_dir = Path.join(target_dir, "priv/static")
+    File.mkdir_p!(static_dir)
+    File.write!(Path.join(static_dir, ".gitkeep"), "")
+
     # Run mix format to fix indentation warnings
     Mix.shell().info("Formatting files...")
     System.cmd("mix", ["format"], cd: target_dir, stderr_to_stdout: true)
@@ -137,10 +144,13 @@ defmodule Mix.Tasks.Dialup.New do
       {"gitignore", ".gitignore"},
       {"formatter.exs", ".formatter.exs"},
       {"app.ex", "lib/#{app_string}.ex"},
+      {"root.html.heex", "lib/root.html.heex"},
       {"layout.ex", "lib/app/layout.ex"},
       {"layout.css", "lib/app/layout.css"},
       {"page.ex", "lib/app/page.ex"},
-      {"page.css", "lib/app/page.css"}
+      {"page.css", "lib/app/page.css"},
+      {"error.ex", "lib/app/error.ex"},
+      {"error.css", "lib/app/error.css"}
     ]
   end
 end

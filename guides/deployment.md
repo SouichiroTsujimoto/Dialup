@@ -228,6 +228,37 @@ example.com {
 
 CaddyはWebSocketの転送とLet's Encrypt証明書の自動取得をデフォルトでサポートする。
 
+## WebSocket オリジン検証
+
+本番環境では、悪意あるサイトからの cross-origin WebSocket 接続を防ぐために `check_origin` を明示的に設定することを推奨する。
+
+```elixir
+use Dialup,
+  app_dir: __DIR__ <> "/app",
+  check_origin: ["https://example.com", "https://www.example.com"]
+```
+
+| 設定値 | 動作 |
+|---|---|
+| `:conn`（デフォルト） | リクエストの `host` と `Origin` ヘッダのホストを比較。開発環境では自動スキップ |
+| `["https://..."]` | 許可するオリジンを明示的にリストで指定（本番推奨） |
+| `false` | チェックを無効化（非推奨） |
+
+> **リバースプロキシ使用時の注意**: `:conn` モードでは `conn.host` はリバースプロキシが転送する `Host` ヘッダの値を使用する。Nginx/Caddy の設定で `proxy_set_header Host $host` が正しく設定されていることを確認すること。本番では明示的なリストを指定する方が確実。
+
+## 静的ファイル配信
+
+`priv/static/` に配置したファイルは `/` パスから配信される。
+
+```
+priv/static/
+├── images/logo.png   → /images/logo.png
+├── favicon.ico       → /favicon.ico
+└── robots.txt        → /robots.txt
+```
+
+本番リリース時は `priv/static/` も含めてビルドされる。
+
 ## 注意点
 
 - **PORT環境変数**: 多くのPaaSではPORTが動的に割り当てられる

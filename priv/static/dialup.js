@@ -15,11 +15,33 @@ const Dialup = (() => {
         }
     }
 
+    function callHook(el, lifecycle) {
+        const name = el.getAttribute("ws-hook");
+        if (!name) return;
+        const hook = hooks[name];
+        if (hook && typeof hook === "object" && typeof hook[lifecycle] === "function") {
+            hook[lifecycle](el);
+        }
+    }
+
     // idiomorph による差分適用
     function applyHtml(html) {
         const root = document.getElementById("dialup-root");
         if (root) {
-            Idiomorph.morph(root, html, { morphStyle: "innerHTML" });
+            Idiomorph.morph(root, html, {
+                morphStyle: "innerHTML",
+                callbacks: {
+                    afterNodeAdded(node) {
+                        if (node.getAttribute?.("ws-hook")) callHook(node, "mounted");
+                    },
+                    afterNodeMorphed(_old, node) {
+                        if (node.getAttribute?.("ws-hook")) callHook(node, "updated");
+                    },
+                    beforeNodeRemoved(node) {
+                        if (node.getAttribute?.("ws-hook")) callHook(node, "destroyed");
+                    }
+                }
+            });
         }
     }
 
@@ -31,8 +53,9 @@ const Dialup = (() => {
             applyHtml(html);
             if (isNavigation) window.scrollTo(0, 0);
             if (pushEvent) {
+                // push_event ハンドラは関数のみ（lifecycle hook オブジェクトは対象外）
                 const handler = hooks[pushEvent];
-                if (handler) handler(payload ?? {});
+                if (typeof handler === "function") handler(payload ?? {});
             }
         };
 

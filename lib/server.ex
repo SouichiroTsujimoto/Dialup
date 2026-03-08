@@ -5,20 +5,35 @@ defmodule Dialup.Server do
   plug(:match)
   plug(:dispatch)
 
-  def init(opts), do: opts
+  def init(opts) do
+    app_module = Keyword.fetch!(opts, :app)
+
+    user_static_opts =
+      if function_exported?(app_module, :__static_dir__, 0) do
+        dir = app_module.__static_dir__()
+        if File.dir?(dir), do: Plug.Static.init(at: "/", from: dir), else: nil
+      end
+
+    Keyword.put(opts, :user_static_opts, user_static_opts)
+  end
 
   def call(conn, opts) do
     app_module = Keyword.fetch!(opts, :app)
 
+    # ユーザの静的ファイルをフレームワークより優先して配信
     conn =
-      conn
-      |> Plug.Conn.put_private(:dialup_app, app_module)
-      |> run_user_plugs(app_module)
+      case Keyword.get(opts, :user_static_opts) do
+        nil -> conn
+        static_opts -> Plug.Static.call(conn, static_opts)
+      end
 
     if conn.halted do
       conn
     else
-      super(conn, opts)
+      conn
+      |> Plug.Conn.put_private(:dialup_app, app_module)
+      |> run_user_plugs(app_module)
+      |> then(fn conn -> if conn.halted, do: conn, else: super(conn, opts) end)
     end
   end
 
@@ -42,18 +57,17 @@ defmodule Dialup.Server do
     app_module = conn.private[:dialup_app]
     conn = Plug.Conn.fetch_cookies(conn)
 
-    case conn.cookies["dialup_session"] do
-      nil ->
-        send_resp(conn, 403, "No session")
-
-      session_id ->
-        conn
-        |> WebSockAdapter.upgrade(
-          Dialup.WebSocket,
-          %{app_module: app_module, session_id: session_id},
-          timeout: :infinity
-        )
-        |> halt()
+    with :ok <- check_origin(conn, app_module),
+         {:ok, session_id} <- fetch_dialup_session(conn) do
+      conn
+      |> WebSockAdapter.upgrade(
+        Dialup.WebSocket,
+        %{app_module: app_module, session_id: session_id},
+        timeout: :infinity
+      )
+      |> halt()
+    else
+      {:error, reason} -> send_resp(conn, 403, reason)
     end
   end
 
@@ -85,11 +99,54 @@ defmodule Dialup.Server do
 
     shell_opts = app_module.__shell_opts__() |> Map.merge(%{inner_content: initial_html})
     shell_opts = if page_title, do: Map.put(shell_opts, :title, page_title), else: shell_opts
-    shell = Dialup.Shell.render(shell_opts)
+    shell = app_module.__render_shell__(shell_opts)
 
     conn
     |> put_resp_content_type("text/html")
     |> send_resp(200, shell)
+  end
+
+  defp fetch_dialup_session(conn) do
+    case conn.cookies["dialup_session"] do
+      nil -> {:error, "No session"}
+      id -> {:ok, id}
+    end
+  end
+
+  defp check_origin(conn, app_module) do
+    check_origin =
+      if function_exported?(app_module, :__check_origin__, 0),
+        do: app_module.__check_origin__(),
+        else: :conn
+
+    cond do
+      # 開発環境はデフォルトでスキップ
+      Code.ensure_loaded?(Mix) and Mix.env() == :dev and check_origin == :conn ->
+        :ok
+
+      # 明示的に false が指定された場合はスキップ
+      check_origin == false ->
+        :ok
+
+      # 許可オリジンリストで検証
+      is_list(check_origin) ->
+        origin = Plug.Conn.get_req_header(conn, "origin") |> List.first()
+
+        if origin in check_origin do
+          :ok
+        else
+          {:error, "Forbidden origin"}
+        end
+
+      # :conn — リクエストの host と Origin ヘッダのホストを比較
+      check_origin == :conn ->
+        origin = Plug.Conn.get_req_header(conn, "origin") |> List.first()
+
+        case origin && URI.parse(origin).host do
+          nil -> :ok
+          host -> if host == conn.host, do: :ok, else: {:error, "Forbidden origin"}
+        end
+    end
   end
 
   defp render_error_for_http(app_module, status, path) do

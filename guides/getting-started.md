@@ -26,13 +26,17 @@ my_app/
 ├── README.md
 ├── mix.exs              # {:dialup, "~> 0.1.0"} を含む
 ├── .gitignore
+├── priv/static/         # 静的ファイル置き場（画像・フォント・favicon など）
 └── lib/
-    ├── my_app.ex        # Applicationモジュール
+    ├── my_app.ex        # Application モジュール
+    ├── root.html.heex   # HTML シェル（<head>・hooks・analytics をカスタマイズ）
     └── app/
         ├── layout.ex    # Dialup.App.Layout（ルートレイアウト）
         ├── layout.css   # レイアウト共通スタイル（コロケーション CSS）
         ├── page.ex      # Dialup.App.Page（ホームページ）
-        └── page.css     # ホームページ固有スタイル（コロケーション CSS）
+        ├── page.css     # ホームページ固有スタイル（コロケーション CSS）
+        ├── error.ex     # エラーページ（404 / 500）
+        └── error.css    # エラーページスタイル
 ```
 
 #### ジェネレータのオプション
@@ -107,7 +111,28 @@ defmodule MyApp do
 end
 ```
 
-### 3. 最初のページ作成
+### 3. root.html.heex の作成
+
+`lib/root.html.heex` を作成：
+
+```html
+<!DOCTYPE html>
+<html lang="{@lang}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{@title}</title>
+</head>
+<body>
+  <div id="dialup-root">{raw(@inner_content)}</div>
+  <script src="/idiomorph.js"></script>
+  <script src="/dialup.js"></script>
+  <script>Dialup.connect();</script>
+</body>
+</html>
+```
+
+### 4. 最初のページ作成
 
 `lib/app/page.ex` を作成：
 
@@ -140,7 +165,7 @@ defmodule Dialup.App.Page do
 end
 ```
 
-### 4. レイアウトの追加（オプション）
+### 5. レイアウトの追加（オプション）
 
 `lib/app/layout.ex` を作成：
 
@@ -163,10 +188,10 @@ defmodule Dialup.App.Layout do
 end
 ```
 
-> **注意**: Layoutは `<main id="dialup-root">` の**中身**のみを生成
-> `<html>`, `<head>`, `<body>` タグはDialup組み込みのShellが担当
+> **注意**: Layout は `#dialup-root` の**中身**のみを生成します。
+> `<html>`, `<head>`, `<body>` タグは `lib/root.html.heex` が担当します。
 
-### 5. 起動
+### 6. 起動
 
 ```bash
 mix run --no-halt
@@ -185,20 +210,61 @@ mix run --no-halt
 推奨ディレクトリ構造：
 
 ```
-lib/
-├── my_app.ex              # Applicationモジュール（use Dialup）
-└── app/
-    ├── layout.ex          # Dialup.App.Layout（共通レイアウト）
-    ├── layout.css         # 全ページ共通スタイル（オプション）
-    ├── page.ex            # Dialup.App.Page（/ ルートページ）
-    ├── page.css           # / 固有スタイル（オプション）
-    ├── about/
-    │   └── page.ex        # Dialup.App.About（/about）
-    └── users/
-        ├── layout.ex      # Dialup.App.Users.Layout（/users以下のレイアウト）
-        ├── layout.css     # /users 配下全ページのスタイル（オプション）
-        └── [id]/
-            └── page.ex    # Dialup.App.Users.Id（/users/:id）
+my_app/
+├── priv/static/           # 静的ファイル（/images/logo.png → /images/logo.png）
+└── lib/
+    ├── my_app.ex          # Application モジュール（use Dialup）
+    ├── root.html.heex     # HTML シェル（<head>・Dialup.connect・analytics）
+    └── app/
+        ├── layout.ex      # Dialup.App.Layout（共通レイアウト）
+        ├── layout.css     # 全ページ共通スタイル（オプション）
+        ├── page.ex        # Dialup.App.Page（/ ルートページ）
+        ├── page.css       # / 固有スタイル（オプション）
+        ├── error.ex       # エラーページ（404 / 500）
+        ├── about/
+        │   └── page.ex    # Dialup.App.About（/about）
+        └── users/
+            ├── layout.ex  # Dialup.App.Users.Layout（/users 以下のレイアウト）
+            ├── layout.css # /users 配下全ページのスタイル（オプション）
+            └── [id]/
+                └── page.ex  # Dialup.App.Users.Id（/users/:id）
+```
+
+### root.html.heex
+
+`lib/root.html.heex` は全ページ共通の HTML シェルです。`<head>` タグへの追加、JS ライブラリの読み込み、`Dialup.connect()` のカスタマイズをここで行います。
+
+```html
+<!DOCTYPE html>
+<html lang="{@lang}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{@title}</title>
+  <!-- ここに <meta>, <link>, analytics を自由に追加 -->
+</head>
+<body>
+  <div id="dialup-root">{raw(@inner_content)}</div>
+  <script src="/idiomorph.js"></script>
+  <script src="/dialup.js"></script>
+  <script>
+    Dialup.connect({
+      /* hooks: { MyHook: { mounted(el) {}, destroyed(el) {} } } */
+    });
+  </script>
+</body>
+</html>
+```
+
+`id="dialup-root"` と `Dialup.connect()` は必須です。削除すると動作しません。
+
+### 静的ファイル配信
+
+`priv/static/` に配置したファイルは `/` パスから自動配信されます。
+
+```html
+<img src="/images/logo.png">
+<link rel="icon" href="/favicon.ico">
 ```
 
 ### コロケーション CSS
