@@ -51,6 +51,8 @@ const Dialup = (() => {
 
         const doApply = () => {
             applyHtml(html);
+            // morph 後に接続状態を再適用（idiomorph が data-ws-state をリセットするため）
+            setConnectionState(socket?.readyState === WebSocket.OPEN);
             if (isNavigation) window.scrollTo(0, 0);
             if (pushEvent) {
                 // push_event ハンドラは関数のみ（lifecycle hook オブジェクトは対象外）
