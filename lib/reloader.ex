@@ -25,11 +25,9 @@ defmodule Dialup.Reloader do
 
     state =
       if new_mtimes != state.mtimes do
-        # 変更されたファイルを touch して mtime を現在時刻に揃える。
-        # Elixir コンパイラは内部で System.os_time(:second) と比較するため、
-        # エディタが付与した mtime がわずかでも先行すると "set to the future" 警告が出る。
-        # File.touch! は同じシステムクロックを使うので確実に正規化できる。
-        touch_changed(state.mtimes, new_mtimes)
+        # コンパイル前に未来 mtime を修正する。
+        # Mix は全ファイルの mtime をチェックするため、未変更ファイルも含めて対象にする。
+        fix_future_mtimes(new_mtimes)
 
         case recompile() do
           :ok ->
@@ -40,7 +38,6 @@ defmodule Dialup.Reloader do
             :ok
         end
 
-        # touch で mtime が変わるため再スキャンして正しい状態を保存
         %{state | mtimes: scan(state.dirs)}
       else
         state
@@ -67,10 +64,11 @@ defmodule Dialup.Reloader do
       :error
   end
 
-  defp touch_changed(old_mtimes, new_mtimes) do
-    past = NaiveDateTime.utc_now() |> NaiveDateTime.add(-1)
-    Enum.each(new_mtimes, fn {path, mtime} ->
-      if Map.get(old_mtimes, path) != mtime, do: File.touch!(path, past)
+  defp fix_future_mtimes(mtimes) do
+    now = :calendar.universal_time()
+    past = then(now, fn {{y, m, d}, {h, min, s}} -> {{y, m, d}, {h, min, max(s - 1, 0)}} end)
+    Enum.each(mtimes, fn {path, mtime} ->
+      if mtime > now, do: File.touch!(path, past)
     end)
   end
 
