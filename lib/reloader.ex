@@ -68,8 +68,9 @@ defmodule Dialup.Reloader do
   end
 
   defp touch_changed(old_mtimes, new_mtimes) do
+    past = NaiveDateTime.utc_now() |> NaiveDateTime.add(-1)
     Enum.each(new_mtimes, fn {path, mtime} ->
-      if Map.get(old_mtimes, path) != mtime, do: File.touch!(path)
+      if Map.get(old_mtimes, path) != mtime, do: File.touch!(path, past)
     end)
   end
 
