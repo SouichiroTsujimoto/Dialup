@@ -178,8 +178,59 @@ app = "my-app"
   MIX_ENV = "prod"
 ```
 
+## HTTPS（リバースプロキシ）
+
+Dialupは直接TLSを終端しないため、Nginx等のリバースプロキシでHTTPSを処理する。WebSocketの`Upgrade`ヘッダー転送が必要。
+
+### Nginx設定例
+
+```nginx
+upstream dialup {
+    server 127.0.0.1:4000;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name example.com;
+
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://dialup;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+    }
+}
+
+server {
+    listen 80;
+    server_name example.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+`proxy_read_timeout` を長めに設定しないと、Nginx がアイドル状態のWebSocket接続を切断する。
+
+### Caddy設定例（自動HTTPS）
+
+```
+example.com {
+    reverse_proxy localhost:4000
+}
+```
+
+CaddyはWebSocketの転送とLet's Encrypt証明書の自動取得をデフォルトでサポートする。
+
 ## 注意点
 
 - **PORT環境変数**: 多くのPaaSではPORTが動的に割り当てられる
-- **WebSocket**: ロードバランサーがWebSocketをサポートしているか確認
+- **WebSocket**: ロードバランサーがWebSocketをサポートしているか確認（`Upgrade`ヘッダーの転送が必要）
 - **ファイルアップロード**: `/tmp` など一時ディレクトリの書き込み権限が必要
+- **セッション永続化**: `session_store: :ets` はノード再起動で消える。永続化が必要な場合は外部ストアの検討を

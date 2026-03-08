@@ -22,8 +22,10 @@ defmodule Dialup.Page do
               | {:redirect, path :: binary(), map()}
               | {:push_event, event_name :: binary(), payload :: map(), map()}
 
-  # mount/1, handle_info はオプショナル
-  @optional_callbacks mount: 1, handle_info: 2
+  # ページタイトルを動的に設定するためのオプショナルコールバック
+  @callback page_title(assigns :: map()) :: binary() | nil
+
+  @optional_callbacks mount: 1, handle_info: 2, page_title: 1
 
   def overwrite(assigns, overwrite) when is_map(assigns) and is_map(overwrite) do
     Map.merge(assigns, overwrite)
@@ -54,8 +56,9 @@ defmodule Dialup.Page do
       # デフォルト実装
       def handle_event(_event, _value, assigns), do: {:noreply, assigns}
       def handle_info(_msg, assigns), do: {:noreply, assigns}
+      def page_title(_assigns), do: nil
 
-      defoverridable handle_event: 3, handle_info: 2
+      defoverridable handle_event: 3, handle_info: 2, page_title: 1
 
       @before_compile Dialup.Page
     end
@@ -159,11 +162,18 @@ defmodule Dialup.Page do
         end
       end
 
-    # 両方のコードを結合して返す
+    use_layout = Module.get_attribute(env.module, :layout, true)
+
+    layout_quote =
+      quote do
+        def __layout__, do: unquote(use_layout)
+      end
+
     quote do
       unquote(mount_quote)
       unquote(render_quote)
       unquote(css_quote)
+      unquote(layout_quote)
     end
   end
 end

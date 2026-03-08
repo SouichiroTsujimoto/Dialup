@@ -71,6 +71,20 @@ end
 
 `:noreply` を使うことで、キー入力のたびに再描画が発生しない。
 
+#### ws-debounce（入力の遅延送信）
+
+`ws-debounce` 属性を追加すると、指定ミリ秒の間入力がなかった場合のみサーバーにイベントを送信する。高速タイピング時のサーバー負荷を軽減する。
+
+```html
+<!-- 300ms 入力が止まったら送信 -->
+<input type="text" ws-change="search" ws-debounce="300" />
+
+<!-- デフォルト: 即時送信（debounce なし） -->
+<input type="text" ws-change="validate" />
+```
+
+debounce は要素ごとに独立して動作する。複数の `ws-change` 要素がある場合、それぞれが個別にタイマーを持つ。
+
 ### ws-href
 
 クライアント側ナビゲーション。

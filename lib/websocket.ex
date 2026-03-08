@@ -22,7 +22,8 @@ defmodule Dialup.WebSocket do
           pid
       end
 
-    {:ok, %{session_pid: session_pid}}
+    Dialup.Telemetry.websocket_connect(%{session_id: session_id})
+    {:ok, %{session_pid: session_pid, session_id: session_id}}
   end
 
   # クライアントからのメッセージを受け取りGenServerに委譲
@@ -60,8 +61,7 @@ defmodule Dialup.WebSocket do
 
   @impl WebSock
   def terminate(_reason, state) do
-    # GenServer は Process.monitor で自動終了するため明示的なstopは不要
-    _ = state
+    Dialup.Telemetry.websocket_disconnect(%{session_id: state[:session_id]})
     :ok
   end
 end

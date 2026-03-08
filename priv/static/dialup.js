@@ -7,6 +7,7 @@ const Dialup = (() => {
     let reconnectTimer = null;
     let hooks = {};
     let transitions = true;
+    const debounceTimers = new WeakMap();
 
     function send(event, value) {
         if (socket && socket.readyState === WebSocket.OPEN) {
@@ -82,12 +83,23 @@ const Dialup = (() => {
             }
         });
 
-        // ws-change: 入力のたびにイベント送信（リアルタイムバリデーション等）
+        // ws-change: 入力のたびにイベント送信（ws-debounce で遅延可能）
         root.addEventListener("input", (e) => {
             const inputEl = e.target.closest("[ws-change]");
             if (inputEl) {
                 const event = inputEl.getAttribute("ws-change");
-                send(event, e.target.value);
+                const debounceMs = parseInt(inputEl.getAttribute("ws-debounce"), 10);
+
+                if (debounceMs > 0) {
+                    const prev = debounceTimers.get(inputEl);
+                    if (prev) clearTimeout(prev);
+                    debounceTimers.set(inputEl, setTimeout(() => {
+                        debounceTimers.delete(inputEl);
+                        send(event, e.target.value);
+                    }, debounceMs));
+                } else {
+                    send(event, e.target.value);
+                }
             }
         });
     }
@@ -145,6 +157,7 @@ const Dialup = (() => {
                 isPopstateNavigation = false;
 
                 applyUpdate(msg.html, msg.path, msg.push_event, msg.payload);
+                if (msg.title !== undefined) document.title = msg.title;
                 currentPath = msg.path;
             }
         };

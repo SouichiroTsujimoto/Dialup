@@ -7,9 +7,10 @@ defmodule Dialup.Router do
 
       @page_files Path.wildcard(Path.join(@_dialup_app_dir, "**/page.ex"))
       @layout_files Path.wildcard(Path.join(@_dialup_app_dir, "**/layout.ex"))
+      @error_files Path.wildcard(Path.join(@_dialup_app_dir, "**/error.ex"))
 
       @external_resource @_dialup_app_dir
-      for file <- @page_files ++ @layout_files do
+      for file <- @page_files ++ @layout_files ++ @error_files do
         @external_resource file
       end
 
@@ -29,6 +30,21 @@ defmodule Dialup.Router do
 
                     {dir, module}
                   end)
+
+      @error_map Map.new(@error_files, fn file ->
+                   relative = Path.relative_to(file, @_dialup_app_dir)
+                   dir = Path.dirname(relative)
+
+                   module =
+                     dir
+                     |> String.split("/")
+                     |> Enum.reject(&(&1 == "."))
+                     |> Enum.map(&Macro.camelize/1)
+                     |> then(fn parts -> parts ++ ["Error"] end)
+                     |> then(fn parts -> Module.concat(["Dialup", "App"] ++ parts) end)
+
+                   {dir, module}
+                 end)
 
       # lambda内でも参照できるよう変数に束縛
       layout_map_snapshot = @layout_map
@@ -145,6 +161,21 @@ defmodule Dialup.Router do
         end
       end
 
+      def error_page_for(path) do
+        {clean_path, _} = split_path_query(path || "/")
+        segments = String.split(String.trim_leading(clean_path, "/"), "/", trim_empty: true)
+
+        candidate_dirs =
+          ["."] ++
+            for i <- 1..length(segments), do: Enum.take(segments, i) |> Enum.join("/")
+
+        candidate_dirs
+        |> Enum.reverse()
+        |> Enum.find_value(fn d ->
+          Map.get(@error_map, d)
+        end)
+      end
+
       def page_for(path) do
         {clean_path, _} = split_path_query(path)
 
@@ -247,15 +278,47 @@ defmodule Dialup.Router do
     page_html = page_mod.render(assigns) |> to_html()
     page_html = wrap_with_scope(page_html, page_mod)
 
+    use_layout =
+      if function_exported?(page_mod, :__layout__, 0), do: page_mod.__layout__(), else: true
+
+    if use_layout do
+      wrapped =
+        layouts
+        |> Enum.reverse()
+        |> Enum.reduce(page_html, fn layout_mod, inner ->
+          html = layout_mod.render(Map.put(assigns, :inner_content, inner)) |> to_html()
+          wrap_with_scope(html, layout_mod)
+        end)
+
+      css = collect_css(layouts, page_mod)
+
+      case css do
+        "" -> wrapped
+        _ -> ~s(<style data-dialup-css>) <> css <> "</style>" <> wrapped
+      end
+    else
+      css = collect_css([], page_mod)
+
+      case css do
+        "" -> page_html
+        _ -> ~s(<style data-dialup-css>) <> css <> "</style>" <> page_html
+      end
+    end
+  end
+
+  def render_with_layouts_raw(inner_html, inner_mod, layouts, assigns) do
+    inner_html = wrap_with_scope(inner_html, inner_mod)
+
     wrapped =
       layouts
       |> Enum.reverse()
-      |> Enum.reduce(page_html, fn layout_mod, inner ->
+      |> Enum.reduce(inner_html, fn layout_mod, inner ->
         html = layout_mod.render(Map.put(assigns, :inner_content, inner)) |> to_html()
         wrap_with_scope(html, layout_mod)
       end)
 
-    css = collect_css(layouts, page_mod)
+    css_mods = layouts ++ [inner_mod]
+    css = collect_css_from(css_mods)
 
     case css do
       "" -> wrapped
@@ -275,7 +338,11 @@ defmodule Dialup.Router do
   end
 
   defp collect_css(layouts, page_mod) do
-    (layouts ++ [page_mod])
+    collect_css_from(layouts ++ [page_mod])
+  end
+
+  defp collect_css_from(modules) do
+    modules
     |> Enum.map(fn mod ->
       if function_exported?(mod, :__css__, 0), do: mod.__css__() || "", else: ""
     end)

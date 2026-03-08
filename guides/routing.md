@@ -179,6 +179,130 @@ layout.css のスコープ div は全子ページの HTML を包むため、layo
 - `.css` 変更時は `@external_resource` 経由で対応する `.ex` が自動再コンパイルされ、ホットリロードが動作する
 - CSS nesting はモダンブラウザ 96%+ でサポート（Chrome 120+, Firefox 117+, Safari 17.2+）
 
+## レイアウトのオプトアウト
+
+特定のページでレイアウト継承を無効にし、全画面表示にしたい場合は `@layout false` を指定する。
+
+```elixir
+defmodule Dialup.App.Login.Page do
+  use Dialup.Page
+
+  @layout false
+
+  def render(assigns) do
+    ~H"""
+    <div class="fullscreen-login">
+      <h1>ログイン</h1>
+      <form ws-submit="login">
+        <input name="email" placeholder="Email" />
+        <input name="password" type="password" />
+        <button type="submit">ログイン</button>
+      </form>
+    </div>
+    """
+  end
+end
+```
+
+`@layout false` を指定すると、親ディレクトリの `layout.ex` は適用されず、ページの HTML が直接 Shell に挿入される。コロケーション CSS（`page.css`）は `@layout false` でも適用される。
+
+## エラーページ
+
+### カスタムエラーページ
+
+`app/` ディレクトリに `error.ex` を置くと、404 や 500 エラー時にユーザー定義のエラーページが表示される。`layout.ex` と同様にディレクトリ階層で継承される。
+
+```
+app/
+├── layout.ex           # 全ページ共通レイアウト
+├── error.ex            # 全ページ共通エラーページ
+├── page.ex
+└── admin/
+    ├── layout.ex       # /admin 配下の共通レイアウト
+    ├── error.ex        # /admin 配下のエラーページ（より具体的）
+    └── page.ex
+```
+
+### error.ex の書き方
+
+`use Dialup.Error` を使い、`render/2` でステータスコードごとに表示を分岐する。
+
+```elixir
+defmodule Dialup.App.Error do
+  use Dialup.Error
+
+  def render(404, assigns) do
+    ~H"""
+    <div class="error-page">
+      <h1>404</h1>
+      <p>ページが見つかりませんでした</p>
+      <a ws-href="/">ホームへ戻る</a>
+    </div>
+    """
+  end
+
+  def render(500, assigns) do
+    ~H"""
+    <div class="error-page">
+      <h1>500</h1>
+      <p>サーバーエラーが発生しました</p>
+    </div>
+    """
+  end
+
+  def render(_status, assigns) do
+    ~H"""
+    <div class="error-page">
+      <h1>{@status}</h1>
+      <p>エラーが発生しました</p>
+    </div>
+    """
+  end
+end
+```
+
+### エラーページの継承
+
+リクエストパスに最も近い `error.ex` が選択される。
+
+- `/admin/users/123` で 404 → `app/admin/error.ex` があればそれ、なければ `app/error.ex`
+- `error.ex` が一つも存在しなければフレームワークのデフォルト表示が使われる
+
+### レイアウトとの関係
+
+エラーページは通常のページと同様に layout に囲われて出力される。全画面のエラーページにしたい場合は `@layout false` を指定する。
+
+```elixir
+defmodule Dialup.App.Error do
+  use Dialup.Error
+
+  @layout false  # layout なしの全画面エラーページ
+
+  def render(404, assigns) do
+    ~H"""
+    <div class="fullscreen-error">
+      <h1>404 Not Found</h1>
+    </div>
+    """
+  end
+end
+```
+
+### assigns に渡される情報
+
+```elixir
+%{
+  status: 404,            # HTTP ステータスコード
+  message: "Not Found"    # ステータスメッセージ
+}
+```
+
+500 エラーの場合、開発環境（`Mix.env() == :dev`）ではさらに `exception` と `stacktrace` が含まれる。
+
+### コロケーション CSS
+
+`error.css` を `error.ex` と同じディレクトリに配置すると、ページや layout と同様に自動スコーピングが適用される。
+
 ## 制限事項
 
 - 正規表現やカスタムパターンマッチは不可

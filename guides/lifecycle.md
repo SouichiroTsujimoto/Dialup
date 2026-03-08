@@ -175,6 +175,45 @@ end
 - `handle_event` / `handle_info` のエラーは元の state に戻す（assigns は変化しない）
 - `mount` のエラーはページが未確定のまま待機状態になる
 
+## page_title/1
+
+ページごとに `<title>` を動的に設定するオプショナルコールバック。
+
+```elixir
+def page_title(assigns) :: binary() | nil
+```
+
+assigns の現在値を受け取り、タイトル文字列を返す。`nil` を返すと `use Dialup` で設定した `title` オプションがそのまま使われる。
+
+```elixir
+defmodule MyApp.App.Users.Id.Page do
+  use Dialup.Page
+
+  def mount(%{"id" => id}, assigns) do
+    user = Users.get!(id)
+    {:ok, %{user: user}}
+  end
+
+  def page_title(assigns) do
+    "#{assigns.user.name} | My App"
+  end
+
+  def render(assigns) do
+    ~H"""
+    <h1>{@user.name}</h1>
+    """
+  end
+end
+```
+
+### 動作の仕組み
+
+- **SSR（初回 HTTP）**: `page_title/1` の結果が Shell の `<title>` に反映される
+- **WebSocket 更新**: サーバーからの JSON メッセージに `title` フィールドが含まれ、`dialup.js` が `document.title` を自動的に更新する
+- **ナビゲーション**: ページ遷移のたびに新しいページの `page_title/1` が呼ばれ、タイトルが更新される
+
+`page_title/1` を定義しない場合はデフォルト実装（`nil` を返す）が使われ、タイトルは変化しない。
+
 ## render/1
 
 ```elixir

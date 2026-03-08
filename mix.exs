@@ -26,11 +26,14 @@ defmodule Dialup.MixProject do
           "guides/lifecycle.md",
           "guides/events.md",
           "guides/helpers.md",
+          "guides/testing.md",
+          "guides/telemetry.md",
           "guides/deployment.md"
         ],
         groups_for_extras: [
           Guides: ~w(guides/getting-started.md guides/routing.md guides/state-management.md 
-                     guides/lifecycle.md guides/events.md guides/helpers.md guides/deployment.md)
+                     guides/lifecycle.md guides/events.md guides/helpers.md
+                     guides/testing.md guides/telemetry.md guides/deployment.md)
         ]
       ]
     ]
@@ -52,6 +55,7 @@ defmodule Dialup.MixProject do
       {:jason, "~> 1.4"},
       {:plug, "~> 1.16"},
       {:phoenix_live_view, "~> 1.0"},
+      {:telemetry, "~> 1.0"},
 
       # 開発依存
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
