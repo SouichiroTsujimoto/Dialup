@@ -20,16 +20,22 @@ Dialup is an Elixir framework for building WebSocket-first applications with a N
 
 ## Quick Start
 
-### Installation
+### 1. Install the generator
 
-```elixir
-# mix.exs
-def deps do
-  [
-    {:dialup, "~> 0.1.0"}
-  ]
-end
+```bash
+mix archive.install hex dialup_new
 ```
+
+### 2. Create a new project
+
+```bash
+mix dialup.new my_app
+cd my_app
+mix deps.get
+mix run --no-halt
+```
+
+Then visit http://localhost:4000
 
 ### Generated project structure
 
@@ -65,15 +71,15 @@ end
 
 ```elixir
 # lib/app/page.ex
-defmodule MyApp.Page do
+defmodule Dialup.App.Page do
   use Dialup.Page
 
   def mount(_params, assigns) do
-    {:ok, set_default(%{count: 0}, assigns)}
+    {:ok, assigns |> set_default(%{count: 0})}
   end
 
   def handle_event("increment", _value, assigns) do
-    {:update, Map.update!(assigns, :count, &(&1 + 1))}
+    {:update, assigns |> overwrite(%{count: assigns.count + 1})}
   end
 
   def render(assigns) do

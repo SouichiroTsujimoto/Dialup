@@ -26,10 +26,10 @@ overwrite(assigns, overwrite_map)
 def mount(params, assigns) do
   id = params["id"]
   user = Users.get!(id)
-  
-  assigns
+
+  {:ok, assigns
   |> overwrite(%{user_id: id})      # assignsを第一引数に取る
-  |> overwrite(%{user: user})       # パイプラインで連結可能
+  |> overwrite(%{user: user})}      # パイプラインで連結可能
 end
 ```
 
@@ -54,9 +54,9 @@ set_default(assigns, defaults_map)
 
 ```elixir
 def mount(_params, assigns) do
-  assigns
+  {:ok, assigns
   |> set_default(%{count: 0})       # 未設定の場合のみ設定
-  |> set_default(%{loaded: false})
+  |> set_default(%{loaded: false})}
 end
 ```
 
@@ -82,9 +82,9 @@ base |> set_default(%{count: 0, loaded: false})
 def mount(params, assigns) do
   # 1. デフォルト値を設定（初回のみ有効）
   # 2. URLパラメータに応じて上書き
-  assigns
+  {:ok, assigns
   |> set_default(%{count: 0, errors: []})
-  |> overwrite(%{user_id: params["id"], loaded: true})
+  |> overwrite(%{user_id: params["id"], loaded: true})}
 end
 ```
 

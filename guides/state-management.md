@@ -15,7 +15,7 @@ Dialupの状態管理は `session`、`assigns`、`params` の3つに分かれて
 `layout.mount/1` が設定する。ページ遷移をまたいで持続するため、ログインユーザー情報などを格納する。
 
 ```elixir
-defmodule MyApp.App.Layout do
+defmodule Dialup.App.Layout do
   use Dialup.Layout
 
   def mount(session) do
@@ -32,7 +32,7 @@ end
 `page.mount/2` が設定する。ナビゲーションのたびにリセットされ、現在のページ固有の状態を保持する。
 
 ```elixir
-defmodule MyApp.App.Users.Id do
+defmodule Dialup.App.Users.Id.Page do
   use Dialup.Page
 
   def mount(%{"id" => id}, assigns) do
