@@ -6,7 +6,6 @@ const Dialup = (() => {
     let reconnectAttempts = 0;
     let reconnectTimer = null;
     let hooks = {};
-    let transitions = true;
     const debounceTimers = new WeakMap();
 
     // タブごとに一意なIDをsessionStorageに保持（再接続時も同じIDを使う）
@@ -52,27 +51,17 @@ const Dialup = (() => {
         }
     }
 
-    // ナビゲーション時はトップへスクロール、View Transitions でアニメーション
     function applyUpdate(html, path, pushEvent, payload) {
         const isNavigation = path !== currentPath;
 
-        const doApply = () => {
-            applyHtml(html);
-            // morph 後に接続状態を再適用（idiomorph が data-ws-state をリセットするため）
-            setConnectionState(socket?.readyState === WebSocket.OPEN);
-            if (isNavigation) window.scrollTo(0, 0);
-            if (pushEvent) {
-                // push_event ハンドラは関数のみ（lifecycle hook オブジェクトは対象外）
-                const handler = hooks[pushEvent];
-                if (typeof handler === "function") handler(payload ?? {});
-            }
-        };
-
-        if (transitions && document.startViewTransition) {
-            // document.startViewTransition(doApply);
-            doApply();
-        } else {
-            doApply();
+        applyHtml(html);
+        // morph 後に接続状態を再適用（idiomorph が data-ws-state をリセットするため）
+        setConnectionState(socket?.readyState === WebSocket.OPEN);
+        if (isNavigation) window.scrollTo(0, 0);
+        if (pushEvent) {
+            // push_event ハンドラは関数のみ（lifecycle hook オブジェクトは対象外）
+            const handler = hooks[pushEvent];
+            if (typeof handler === "function") handler(payload ?? {});
         }
     }
 
@@ -215,7 +204,6 @@ const Dialup = (() => {
 
     function connect(opts = {}) {
         hooks = opts.hooks ?? {};
-        transitions = opts.transitions ?? true;
         currentPath = window.location.pathname;
         history.replaceState({ path: currentPath }, "", currentPath);
         setupPopstate();
