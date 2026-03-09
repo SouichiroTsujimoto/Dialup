@@ -14,7 +14,7 @@ defmodule Dialup.MixProject do
       name: "Dialup",
       description: "WebSocket-first, file-based routing Elixir framework",
       source_url: "https://github.com/SouichiroTsujimoto/Dialup",
-      homepage_url: "https://github.com/SouichiroTsujimoto/Dialup",
+      homepage_url: "https://dialup-framework.org",
       docs: [
         main: "readme",
         extras: [
@@ -68,9 +68,10 @@ defmodule Dialup.MixProject do
       description: "WebSocket-first, file-based routing Elixir framework",
       licenses: ["MIT"],
       links: %{
+        "Website" => "https://dialup-framework.org",
         "GitHub" => "https://github.com/SouichiroTsujimoto/Dialup"
       },
-      files: ~w(lib priv mix.exs README.md LICENSE)
+      files: ~w(lib priv guides mix.exs README.md LICENSE)
     ]
   end
 end
