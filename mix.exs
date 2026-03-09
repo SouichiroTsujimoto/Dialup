@@ -4,7 +4,7 @@ defmodule Dialup.MixProject do
   def project do
     [
       app: :dialup,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -31,7 +31,7 @@ defmodule Dialup.MixProject do
           "guides/deployment.md"
         ],
         groups_for_extras: [
-          Guides: ~w(guides/getting-started.md guides/routing.md guides/state-management.md 
+          Guides: ~w(guides/getting-started.md guides/routing.md guides/state-management.md
                      guides/lifecycle.md guides/events.md guides/helpers.md
                      guides/testing.md guides/telemetry.md guides/deployment.md)
         ]
