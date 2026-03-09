@@ -8,12 +8,11 @@ const Dialup = (() => {
     let hooks = {};
     const debounceTimers = new WeakMap();
 
-    // タブごとに一意なIDをsessionStorageに保持（再接続時も同じIDを使う）
-    let tabId = sessionStorage.getItem("dialup_tab_id");
-    if (!tabId) {
-        tabId = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-        sessionStorage.setItem("dialup_tab_id", tabId);
-    }
+    // タブごとに一意なIDをインメモリで保持する
+    // sessionStorage はタブ複製時にコピーされるブラウザがあるため使用しない
+    // インメモリであれば複製タブは必ず別のIDを持ち、ネットワーク再接続時は同じIDを再利用できる
+    // Math.random() は予測可能なため crypto.randomUUID() を使用する
+    const tabId = crypto.randomUUID();
 
     function send(event, value) {
         if (socket && socket.readyState === WebSocket.OPEN) {

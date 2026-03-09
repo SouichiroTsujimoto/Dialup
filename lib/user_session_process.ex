@@ -19,6 +19,7 @@ defmodule Dialup.UserSessionProcess do
   def init_session(pid, path), do: GenServer.cast(pid, {:init, path})
   def navigate(pid, path), do: GenServer.cast(pid, {:navigate, path})
   def event(pid, event, value), do: GenServer.cast(pid, {:event, event, value})
+  def session_id(pid), do: GenServer.call(pid, :get_session_id)
   def take_over(pid, new_socket_pid), do: GenServer.cast(pid, {:take_over, new_socket_pid})
   def reconnect(pid, path), do: GenServer.cast(pid, {:reconnect, path})
 
@@ -56,6 +57,11 @@ defmodule Dialup.UserSessionProcess do
       end
 
     {:ok, state}
+  end
+
+  @impl GenServer
+  def handle_call(:get_session_id, _from, state) do
+    {:reply, state.session_id, state}
   end
 
   # 初回接続：layout.mount → session、page.mount → assigns

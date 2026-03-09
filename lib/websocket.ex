@@ -12,9 +12,19 @@ defmodule Dialup.WebSocket do
     session_pid =
       case Registry.lookup(Dialup.SessionRegistry, registry_key) do
         [{pid, _}] ->
-          # 既存プロセスが生存中（同タブの再接続）→ socket_pidだけ更新して引き継ぐ
-          Dialup.UserSessionProcess.take_over(pid, self())
-          pid
+          # session_id が一致する場合のみ引き継ぐ（tab_id が推測された場合の乗っ取りを防ぐ）
+          if Dialup.UserSessionProcess.session_id(pid) == session_id do
+            Dialup.UserSessionProcess.take_over(pid, self())
+            pid
+          else
+            {:ok, new_pid} =
+              DynamicSupervisor.start_child(
+                Dialup.SessionSupervisor,
+                {Dialup.UserSessionProcess, {self(), app_module, session_id, registry_key}}
+              )
+
+            new_pid
+          end
 
         [] ->
           # プロセスが存在しない（初回 or タイムアウト済み）→ 新規起動
