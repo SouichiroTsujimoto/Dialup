@@ -2,7 +2,7 @@ defmodule Dialup do
   @moduledoc """
   Dialup is a WebSocket-first, file-based routing framework for Elixir.
 
-  Each browser tab gets its own Elixir process (`Dialup.UserSessionProcess`), and all
+  Each browser tab gets its own Elixir process (an internal `UserSessionProcess`), and all
   user interactions flow through that process via WebSocket. The server renders HTML and
   sends it to the client, where [idiomorph](https://github.com/bigskysoftware/idiomorph)
   morphs the DOM efficiently.
