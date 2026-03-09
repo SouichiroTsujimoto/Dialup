@@ -5,11 +5,14 @@ defmodule Dialup.UserSessionProcess do
   @session_timeout :timer.minutes(5)
 
   # DynamicSupervisor から起動される（引数はタプル）
-  def start_link({socket_pid, app_module, session_id}) do
+  # registry_key: タブごとの一意キー（tab_id || session_id）
+  # session_id: Cookie由来のセッションID（ETS永続化に使用）
+  def start_link({socket_pid, app_module, session_id, registry_key}) do
     GenServer.start_link(__MODULE__, %{
       socket_pid: socket_pid,
       app_module: app_module,
-      session_id: session_id
+      session_id: session_id,
+      registry_key: registry_key
     })
   end
 
@@ -20,8 +23,8 @@ defmodule Dialup.UserSessionProcess do
   def reconnect(pid, path), do: GenServer.cast(pid, {:reconnect, path})
 
   @impl GenServer
-  def init(%{socket_pid: socket_pid, app_module: app_module, session_id: session_id}) do
-    {:ok, _} = Registry.register(Dialup.SessionRegistry, session_id, nil)
+  def init(%{socket_pid: socket_pid, app_module: app_module, session_id: session_id, registry_key: registry_key}) do
+    {:ok, _} = Registry.register(Dialup.SessionRegistry, registry_key, nil)
     ref = Process.monitor(socket_pid)
 
     base_state = %{

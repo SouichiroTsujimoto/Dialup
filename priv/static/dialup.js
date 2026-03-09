@@ -9,6 +9,13 @@ const Dialup = (() => {
     let transitions = true;
     const debounceTimers = new WeakMap();
 
+    // タブごとに一意なIDをsessionStorageに保持（再接続時も同じIDを使う）
+    let tabId = sessionStorage.getItem("dialup_tab_id");
+    if (!tabId) {
+        tabId = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+        sessionStorage.setItem("dialup_tab_id", tabId);
+    }
+
     function send(event, value) {
         if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ event, value }));
@@ -62,7 +69,8 @@ const Dialup = (() => {
         };
 
         if (transitions && document.startViewTransition) {
-            document.startViewTransition(doApply);
+            // document.startViewTransition(doApply);
+            doApply();
         } else {
             doApply();
         }
@@ -145,7 +153,7 @@ const Dialup = (() => {
 
     function connectSocket(opts = {}) {
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        const url = `${proto}//${location.host}/ws`;
+        const url = `${proto}//${location.host}/ws?tab_id=${encodeURIComponent(tabId)}`;
 
         socket = new WebSocket(url);
 

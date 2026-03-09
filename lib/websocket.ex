@@ -3,12 +3,16 @@ defmodule Dialup.WebSocket do
   @behaviour WebSock
 
   # WebSocket接続確立時、既存セッションを引き継ぐか新規プロセスを起動する
+  # tab_id (sessionStorage) をregistry keyとして使うことで、
+  # 同一ブラウザの複数タブが互いのセッションプロセスを上書きしない
   @impl WebSock
-  def init(%{app_module: app_module, session_id: session_id}) do
+  def init(%{app_module: app_module, session_id: session_id, tab_id: tab_id}) do
+    registry_key = tab_id || session_id
+
     session_pid =
-      case Registry.lookup(Dialup.SessionRegistry, session_id) do
+      case Registry.lookup(Dialup.SessionRegistry, registry_key) do
         [{pid, _}] ->
-          # 既存プロセスが生存中 → socket_pidだけ更新して引き継ぐ
+          # 既存プロセスが生存中（同タブの再接続）→ socket_pidだけ更新して引き継ぐ
           Dialup.UserSessionProcess.take_over(pid, self())
           pid
 
@@ -17,7 +21,7 @@ defmodule Dialup.WebSocket do
           {:ok, pid} =
             DynamicSupervisor.start_child(
               Dialup.SessionSupervisor,
-              {Dialup.UserSessionProcess, {self(), app_module, session_id}}
+              {Dialup.UserSessionProcess, {self(), app_module, session_id, registry_key}}
             )
 
           pid

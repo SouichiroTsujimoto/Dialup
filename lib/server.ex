@@ -56,14 +56,15 @@ defmodule Dialup.Server do
   # WebSocket upgrade endpoint
   get "/ws" do
     app_module = conn.private[:dialup_app]
-    conn = Plug.Conn.fetch_cookies(conn)
+    conn = conn |> Plug.Conn.fetch_cookies() |> Plug.Conn.fetch_query_params()
+    tab_id = conn.params["tab_id"]
 
     with :ok <- check_origin(conn, app_module),
          {:ok, session_id} <- fetch_dialup_session(conn) do
       conn
       |> WebSockAdapter.upgrade(
         Dialup.WebSocket,
-        %{app_module: app_module, session_id: session_id},
+        %{app_module: app_module, session_id: session_id, tab_id: tab_id},
         timeout: :infinity
       )
       |> halt()
