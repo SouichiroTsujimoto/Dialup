@@ -446,6 +446,7 @@ defmodule Dialup.UserSessionProcess do
     state.session
     |> Map.merge(state.assigns)
     |> Map.put(:params, state.params)
+    |> Map.put(:current_path, state.path)
   end
 
   # handle_event/handle_info の返り値を session と assigns に分割する

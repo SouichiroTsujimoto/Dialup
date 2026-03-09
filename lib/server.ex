@@ -87,7 +87,8 @@ defmodule Dialup.Server do
 
         page_module ->
           params = app_module.path_params(path)
-          {:ok, assigns} = page_module.mount(params, %{params: params})
+          {:ok, assigns} = page_module.mount(params, %{params: params, current_path: path})
+          assigns = Map.put(assigns, :current_path, path)
 
           html =
             case app_module.dispatch(path, assigns) do
