@@ -1,6 +1,8 @@
-# Dialup
+# Dialup (日本語)
 
 WebSocket-first, file-based routing Elixir framework.
+
+[English](./README.md)
 
 ## 概要
 

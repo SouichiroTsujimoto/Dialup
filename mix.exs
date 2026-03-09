@@ -19,6 +19,7 @@ defmodule Dialup.MixProject do
         main: "readme",
         extras: [
           "README.md",
+          "README.ja.md",
           "guides/getting-started.md",
           "guides/fullstack-example.md",
           "guides/routing.md",
