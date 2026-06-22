@@ -4,6 +4,11 @@ WebSocket-first, file-based routing Elixir framework.
 
 [日本語](./README.ja.md)
 
+## Links
+
+- [Official website](https://dialup-framework.org/)
+- [Getting Started guide](https://dialup.hexdocs.pm/getting-started.html)
+
 ## Overview
 
 Dialup is an Elixir framework for building WebSocket-first applications with a Next.js-like developer experience.
