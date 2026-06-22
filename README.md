@@ -6,7 +6,10 @@ WebSocket-first, file-based routing Elixir framework.
 
 ## Overview
 
-Dialup is an Elixir framework for building WebSocket-first applications with a Next.js-like developer experience.
+Dialup is an Elixir framework for building WebSocket-first applications with a Next.js-like
+developer experience. A Dialup page is one supervised server-side actor with multiple
+projections: HTML for a human and a scoped semantic/MCP surface for an AI agent. Both
+operators share the same live state and ordered event stream.
 
 ### Features
 
@@ -17,6 +20,7 @@ Dialup is an Elixir framework for building WebSocket-first applications with a N
 - **Colocated CSS** — `.css` files next to `.ex` files, auto-scoped at compile time
 - **Static file serving** — `priv/static/` served automatically
 - **WebSocket origin verification** — cross-origin connection protection built in
+- **Human → AI handoff** — scoped MCP tools, semantic focus, approvals, and full-duplex co-drive
 
 ## Quick Start
 
@@ -103,6 +107,8 @@ Guide source files live in `guides/`:
 - [State Management](./guides/state-management.md) — managing server-side state
 - [Lifecycle](./guides/lifecycle.md) — page lifecycle hooks
 - [Events](./guides/events.md) — handling events
+- [Building agent-native apps](./guides/agent-native-app-development.md) — implementation workflow for developers and coding agents
+- [Human → AI handoff](./guides/agent-handoff.md) — share one live session with an agent
 - [Helpers](./guides/helpers.md) — helper functions
 - [Deployment](./guides/deployment.md) — deploying to production
 - [Fullstack Example](./guides/fullstack-example.md) — a practical app using Ecto and PubSub

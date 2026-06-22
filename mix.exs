@@ -26,6 +26,8 @@ defmodule Dialup.MixProject do
           "guides/state-management.md",
           "guides/lifecycle.md",
           "guides/events.md",
+          "guides/agent-native-app-development.md",
+          "guides/agent-handoff.md",
           "guides/helpers.md",
           "guides/testing.md",
           "guides/telemetry.md",
@@ -33,7 +35,8 @@ defmodule Dialup.MixProject do
         ],
         groups_for_extras: [
           Guides: ~w(guides/getting-started.md guides/routing.md guides/state-management.md
-                     guides/lifecycle.md guides/events.md guides/helpers.md
+                     guides/lifecycle.md guides/events.md guides/agent-native-app-development.md
+                     guides/agent-handoff.md guides/helpers.md
                      guides/testing.md guides/telemetry.md guides/deployment.md)
         ]
       ]
@@ -72,7 +75,16 @@ defmodule Dialup.MixProject do
         "Website" => "https://dialup-framework.org",
         "GitHub" => "https://github.com/SouichiroTsujimoto/Dialup"
       },
-      files: ~w(lib priv guides mix.exs README.md LICENSE)
+      files:
+        ~w(lib priv guides AGENTS.md mix.exs README.md README.ja.md LICENSE) ++
+          ~w(
+            examples/handoff_demo/.gitignore
+            examples/handoff_demo/README.md
+            examples/handoff_demo/agent.py
+            examples/handoff_demo/mix.exs
+            examples/handoff_demo/mix.lock
+            examples/handoff_demo/lib
+          )
     ]
   end
 end
