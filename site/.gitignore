@@ -1,14 +1,11 @@
 # The directory Mix will write compiled artifacts to.
 /_build/
-site/_build/
 
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
-site/cover/
 
 # The directory Mix downloads your dependencies sources to.
 /deps/
-site/deps/
 
 # Where third-party dependencies like ExDoc output generated docs.
 /doc/
@@ -24,5 +21,7 @@ erl_crash.dump
 
 # Ignore package tarball (built via "mix hex.build").
 dialup-*.tar
+
+.env
 
 .DS_Store

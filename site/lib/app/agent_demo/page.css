@@ -1,0 +1,434 @@
+.mcp-demo {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.mcp-hero {
+  text-align: center;
+  margin-bottom: 1.75rem;
+}
+
+.mcp-eyebrow {
+  display: inline-block;
+  margin: 0 0 0.75rem;
+  padding: 0.2rem 0.75rem;
+  border: 1px solid var(--main-text);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.mcp-hero h1 {
+  margin: 0 0 1rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.9rem, 4.5vw, 3rem);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+}
+
+.mcp-lead {
+  max-width: 660px;
+  margin: 0 auto;
+  line-height: 1.7;
+  font-size: 1rem;
+}
+
+.mcp-steps {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0 0 2rem;
+  padding: 0;
+}
+
+.mcp-steps li {
+  flex: 1 1 280px;
+  max-width: 340px;
+  border: var(--border);
+  background: var(--main-background);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.mcp-steps strong {
+  color: var(--accent);
+  margin-right: 0.35rem;
+}
+
+.mcp-board-wrap {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+/* ── Task board (human) ───────────────────────────── */
+.mcp-board {
+  border: var(--border);
+  background: var(--main-background);
+}
+
+.mcp-board-head {
+  padding: 1rem 1.1rem;
+  border-bottom: var(--border);
+  background: var(--main-text);
+  color: var(--main-background);
+}
+
+.mcp-demo-tag {
+  display: inline-block;
+  margin-bottom: 0.6rem;
+  padding: 0.18rem 0.6rem;
+  background: var(--accent);
+  color: #111;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  border-radius: 3px;
+}
+
+.mcp-project-label {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+  margin-bottom: 0.35rem;
+}
+
+.mcp-project-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
+  font-size: 1rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 2px;
+}
+
+.mcp-tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem;
+  min-height: 9rem;
+}
+
+.mcp-task-empty {
+  padding: 1.5rem 1rem;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.mcp-task {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.65rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  animation: mcp-pop 0.35s ease;
+}
+
+.mcp-task:last-child { border-bottom: none; }
+
+@keyframes mcp-pop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.mcp-by-ai { background: linear-gradient(90deg, rgba(124, 58, 237, 0.08), transparent); }
+
+.mcp-actor {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.mcp-actor-ai { color: #7c3aed; }
+.mcp-actor-human { color: #0f766e; }
+
+.mcp-task-title {
+  flex: 1;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.mcp-task.is-done .mcp-task-title {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.mcp-prio {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #b91c1c;
+  border: 1px solid #b91c1c;
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+}
+
+.mcp-task-done {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.6rem;
+  border: var(--border);
+  background: var(--main-background);
+  cursor: pointer;
+}
+
+.mcp-check {
+  flex-shrink: 0;
+  color: #15803d;
+  font-weight: 800;
+}
+
+.mcp-add {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-top: var(--border);
+}
+
+.mcp-add input {
+  flex: 1;
+  padding: 0.5rem 0.65rem;
+  border: var(--border);
+  font-size: 0.9rem;
+}
+
+.mcp-add button {
+  padding: 0.5rem 1rem;
+  border: var(--border);
+  background: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mcp-board-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0.6rem 1rem;
+  border-top: var(--border);
+  font-size: 0.78rem;
+}
+
+.mcp-board-foot span { opacity: 0.7; }
+
+.mcp-clear-btn {
+  padding: 0.3rem 0.7rem;
+  border: var(--border);
+  background: var(--main-background);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+/* ── Handoff card (agent) ─────────────────────────── */
+.mcp-handoff {
+  border: 2px solid var(--main-text);
+  background: var(--main-background);
+  box-shadow: 6px 6px 0 var(--accent);
+}
+
+.mcp-handoff-cta {
+  padding: 1.5rem 1.25rem;
+  text-align: center;
+}
+
+.mcp-handoff-cta h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+}
+
+.mcp-handoff-cta p {
+  margin: 0 0 1.1rem;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.mcp-handoff-btn {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  border: var(--border);
+  background: var(--accent);
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.mcp-handoff-btn:disabled { opacity: 0.5; cursor: progress; }
+
+.mcp-handoff-status {
+  margin: 0.75rem 0 0;
+  font-size: 0.8rem;
+  color: #b91c1c;
+  min-height: 1em;
+}
+
+.mcp-handoff-live { padding: 1.25rem; }
+
+.mcp-handoff-badge {
+  display: inline-block;
+  margin: 0 0 0.5rem;
+  padding: 0.2rem 0.6rem;
+  background: #15803d;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 3px;
+}
+
+.mcp-handoff-note {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  opacity: 0.8;
+}
+
+.mcp-field-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0.9rem 0 0.35rem;
+  opacity: 0.7;
+}
+
+.mcp-copy-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.mcp-endpoint {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.6rem;
+  border: var(--border);
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: "Fira Code", Consolas, monospace;
+  font-size: 0.72rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.mcp-copy {
+  flex-shrink: 0;
+  padding: 0.45rem 0.7rem;
+  border: var(--border);
+  background: var(--main-background);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.mcp-copy-block { position: relative; }
+
+.mcp-copy-block pre,
+.mcp-curl pre {
+  margin: 0 0 0.4rem;
+  padding: 0.75rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: var(--border);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.mcp-curl { margin-top: 0.9rem; font-size: 0.85rem; }
+.mcp-curl summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
+
+.mcp-demo-run {
+  margin-top: 1.1rem;
+  padding-top: 1.1rem;
+  border-top: 1px dashed var(--main-text);
+}
+
+.mcp-run-btn {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: var(--border);
+  background: var(--accent2, #fde68a);
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.mcp-run-btn:disabled { cursor: progress; }
+
+.mcp-demo-hint {
+  margin: 0.6rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  opacity: 0.75;
+}
+
+/* ── Generated tool catalog ──────────────────────── */
+.mcp-tools {
+  padding: 1rem 1.25rem 1.25rem;
+  border-top: var(--border);
+  background: #faf8f3;
+}
+
+.mcp-tools-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.mcp-tools ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.mcp-tools li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.mcp-tools li:last-child { border-bottom: none; }
+
+.mcp-tools code {
+  font-weight: 700;
+  color: #7c3aed;
+}
+
+.mcp-tool-desc { opacity: 0.75; margin-left: 0.4rem; }
+.mcp-tool-params {
+  font-family: "Fira Code", Consolas, monospace;
+  font-size: 0.72rem;
+  opacity: 0.55;
+  margin-left: 0.3rem;
+}
+
+@media (max-width: 860px) {
+  .mcp-board-wrap { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .mcp-demo { padding: 1.25rem 1rem 2.5rem; }
+}

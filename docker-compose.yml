@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    ports:
+      - "4001:4001"
+    environment:
+      PORT: "4001"
+      MIX_ENV: prod
+    restart: unless-stopped

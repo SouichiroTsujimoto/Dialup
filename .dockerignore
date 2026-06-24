@@ -1,0 +1,8 @@
+**/_build/
+**/deps/
+**/.git/
+**/.env
+**/.DS_Store
+**/erl_crash.dump
+**/.expert/
+doc/
