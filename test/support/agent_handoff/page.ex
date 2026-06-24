@@ -27,6 +27,8 @@ defmodule Dialup.AgentHandoffTest.Page do
 
   def __available__(:increment, assigns), do: assigns.count < 10
   def __available__(:reset, _assigns), do: true
+  def __available__(:navigate_root, assigns), do: assigns.count == 0
+  def __available__(_action, _assigns), do: true
 
   def agent_state(assigns), do: %{count: assigns.count}
 

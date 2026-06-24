@@ -23,7 +23,9 @@ defmodule Dialup.Agent do
   def layout_actions(app_module, path) when is_binary(path) do
     app_module.layouts_for(path)
     |> Enum.filter(&function_exported?(&1, :__dialup_actions__, 0))
-    |> Enum.flat_map(& &1.__dialup_actions__())
+    |> Enum.flat_map(fn mod ->
+      Enum.map(mod.__dialup_actions__(), &Map.put(&1, :module, mod))
+    end)
   end
 
   def layout_actions(_app_module, _path), do: []
@@ -138,7 +140,8 @@ defmodule Dialup.Agent do
                 if(grant, do: grant.require_version, else: true)
               )
 
-        available = if navigate, do: true, else: available?(page_module, action.name, assigns)
+        module = Map.get(action, :module, page_module)
+        available = available?(module, action.name, assigns)
 
         %{
           "name" => name,
@@ -561,7 +564,7 @@ defmodule Dialup.Agent do
         "confirm=human actions return error -32004 over HTTP MCP. Use the human browser UI instead.",
       "navigation" =>
         "Navigation is exposed as ordinary actions whose _meta.navigate is the destination path " <>
-          "(for example navigate_docs_concepts). Call one to open that page, just like a human " <>
+          "(for example navigate_docs__concepts). Call one to open that page, just like a human " <>
           "clicking the same link. The human browser follows. The tool catalog changes per page, " <>
           "so call tools/list or read_scene after navigating. There is no free-form navigate tool: " <>
           "agents reach exactly the pages the UI links to.",

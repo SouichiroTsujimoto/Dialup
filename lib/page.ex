@@ -165,7 +165,7 @@ defmodule Dialup.Page do
 
   Navigation actions take no parameters; the destination is fixed at the declaration
   site. When `name` is omitted it is derived from the path (e.g. `/docs/concepts`
-  becomes `:navigate_docs_concepts`).
+  becomes `:navigate_docs__concepts`).
   """
   def dialup_action(%{navigate: navigate} = assigns) when is_binary(navigate) do
     name =
@@ -262,16 +262,29 @@ defmodule Dialup.Page do
   @doc """
   Derives the canonical navigation action name for an app path.
 
-  `/docs/concepts` becomes `:navigate_docs_concepts` and `/` becomes `:navigate_root`.
+  `/docs/concepts` becomes `:navigate_docs__concepts` and `/` becomes `:navigate_root`.
+  Path segments are joined with `__` so `/foo-bar` and `/foo/bar` stay distinct.
   """
   def navigate_action_name(path) when is_binary(path) do
-    slug =
-      path
-      |> String.trim("/")
-      |> String.replace(~r/[^a-zA-Z0-9]+/, "_")
-      |> String.trim("_")
+    trimmed = String.trim(path, "/")
 
-    String.to_atom("navigate_" <> if(slug == "", do: "root", else: slug))
+    slug =
+      if trimmed == "" do
+        "root"
+      else
+        trimmed
+        |> String.split("/")
+        |> Enum.map(&segment_slug/1)
+        |> Enum.join("__")
+      end
+
+    String.to_atom("navigate_" <> slug)
+  end
+
+  defp segment_slug(segment) do
+    segment
+    |> String.replace(~r/[^a-zA-Z0-9]+/, "_")
+    |> String.trim("_")
   end
 
   @doc """
@@ -547,6 +560,7 @@ defmodule Dialup.Page do
   defp validate_semantic_declarations!(env, actions, regions) do
     validate_unique!(env, actions, "action")
     validate_unique!(env, regions, "region")
+    validate_navigate_paths!(env, actions)
 
     Enum.each(actions, fn action ->
       for key <- [:name, :desc, :params], not Map.has_key?(action, key) do
@@ -578,6 +592,34 @@ defmodule Dialup.Page do
         file: env.file,
         line: env.line,
         description: "duplicate Dialup #{kind} declarations: #{inspect(Enum.uniq(duplicates))}"
+    end
+  end
+
+  defp validate_navigate_paths!(env, actions) do
+    navigates = Enum.filter(actions, &Map.has_key?(&1, :navigate))
+
+    collisions =
+      navigates
+      |> Enum.group_by(& &1.name)
+      |> Enum.flat_map(fn {name, group} ->
+        paths = group |> Enum.map(& &1.navigate) |> Enum.uniq()
+
+        if length(paths) > 1 do
+          [{name, paths}]
+        else
+          []
+        end
+      end)
+
+    if collisions != [] do
+      {name, paths} = hd(collisions)
+
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "conflicting navigate paths for action #{inspect(name)}: #{inspect(paths)}. " <>
+            "Use distinct paths or explicit name={...} overrides."
     end
   end
 

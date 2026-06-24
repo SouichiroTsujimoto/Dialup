@@ -374,6 +374,10 @@ defmodule Dialup.UserSessionProcess do
 
   # ページ遷移：session は保持、assigns をリセットして page.mount を呼ぶ
   @impl GenServer
+  def handle_cast({:navigate, _path}, %{ui_locked: true} = state) do
+    {:noreply, update_page(state)}
+  end
+
   def handle_cast({:navigate, path}, state) do
     {:noreply, do_navigate(path, bump_version(state))}
   end
@@ -873,7 +877,7 @@ defmodule Dialup.UserSessionProcess do
           invoke_mutating_action(state, token, grant, page_module, action, name, arguments)
 
         path ->
-          invoke_navigate_action(state, token, grant, name, path)
+          invoke_navigate_action(state, token, grant, action, name, path)
       end
     else
       nil -> {{:error, :unknown_action}, state}
@@ -887,7 +891,11 @@ defmodule Dialup.UserSessionProcess do
          clean_arguments = Map.drop(arguments, ["_version", :_version]),
          {:ok, clean_arguments} <- validate_agent_arguments(action, clean_arguments),
          true <-
-           Dialup.Agent.available?(page_module, action.name, merge_for_render(state)) ||
+           Dialup.Agent.available?(
+             Map.get(action, :module, page_module),
+             action.name,
+             merge_for_render(state)
+           ) ||
              {:error, :unavailable} do
       if Map.get(action, :confirm) == :human do
         {{:error, :human_confirmation_required},
@@ -909,13 +917,25 @@ defmodule Dialup.UserSessionProcess do
     end
   end
 
-  defp invoke_navigate_action(state, token, grant, name, path) do
-    if is_nil(state.app_module.page_for(path)) do
-      {{:error, :unknown_target}, audit(state, token, name, :error)}
-    else
-      navigated = do_navigate(path, bump_version(state))
-      navigated = audit(navigated, token, name, :ok, %{"path" => path})
-      {{:ok, current_scene(navigated, grant)}, navigated}
+  defp invoke_navigate_action(state, token, grant, action, name, path) do
+    module = Map.get(action, :module, current_page(state))
+    assigns = merge_for_render(state)
+
+    cond do
+      Map.get(action, :confirm) == :human ->
+        {{:error, :human_confirmation_required},
+         audit(state, token, name, :human_confirmation_required)}
+
+      not Dialup.Agent.available?(module, action.name, assigns) ->
+        {{:error, :unavailable}, audit(state, token, name, :error)}
+
+      is_nil(state.app_module.page_for(path)) ->
+        {{:error, :unknown_target}, audit(state, token, name, :error)}
+
+      true ->
+        navigated = do_navigate(path, bump_version(state))
+        navigated = audit(navigated, token, name, :ok, %{"path" => path})
+        {{:ok, current_scene(navigated, grant)}, navigated}
     end
   end
 

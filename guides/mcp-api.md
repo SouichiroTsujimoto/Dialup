@@ -145,11 +145,12 @@ with `navigate` on `<.dialup_action>`:
 
 This renders an ordinary `ws-href` link for humans and, from the same declaration, generates a
 navigation tool for agents. The tool name is derived from the path (`/docs/concepts` →
-`navigate_docs_concepts`); pass an explicit `name={...}` to override it. The action takes no
+`navigate_docs__concepts`; path segments join with `__` so `/foo-bar` and `/foo/bar` stay
+distinct); pass an explicit `name={...}` to override it. The action takes no
 arguments because the destination is fixed at the declaration site:
 
 ```json
-{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"navigate_docs_concepts","arguments":{}}}
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"navigate_docs__concepts","arguments":{}}}
 ```
 
 Calling it runs the same code path as a human clicking the link: the page re-mounts and the human's
@@ -160,7 +161,9 @@ browser follows in real time. Each page generates a different tool catalog, so c
 Navigation links declared on a **layout** (for shared chrome like a nav bar) are merged into the
 tool catalog of every page under that layout, so an agent gets the same site-wide navigation a human
 sees. Because navigation actions are ordinary actions, they are gated by capability under their
-derived name (e.g. `:navigate_docs_concepts`); a `:all` grant includes them automatically.
+derived name (e.g. `:navigate_docs__concepts`); a `:all` grant includes them automatically.
+Navigation actions respect the same `__available__/2` predicates and `confirm: :human` gates as
+mutating actions.
 
 ## Locking the human UI
 

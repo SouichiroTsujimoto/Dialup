@@ -131,6 +131,34 @@ defmodule Dialup.AgentHandoffTest do
     assert forbidden["error"]["code"] == -32_003
   end
 
+  test "navigation availability follows __available__/2", %{pid: pid, token: token} do
+    UserSessionProcess.event(pid, "increment", %{"amount" => 1})
+    assert_receive {:send_html, _}
+
+    listed = rpc(token, 1, "tools/list", %{})
+    root = Enum.find(listed["result"]["tools"], &(&1["name"] == "navigate_root"))
+    assert root["_meta"]["available"] == false
+
+    blocked =
+      rpc(token, 2, "tools/call", %{"name" => "navigate_root", "arguments" => %{}})
+
+    assert blocked["error"]["code"] == -32_003
+  end
+
+  test "confirm=human navigation is unsupported over HTTP MCP", %{token: token} do
+    result =
+      rpc(token, 1, "tools/call", %{"name" => "navigate_board_human", "arguments" => %{}})
+
+    assert result["error"]["code"] == -32_004
+    assert result["error"]["data"]["confirm"] == "human"
+  end
+
+  test "navigate_action_name distinguishes hyphenated and nested paths" do
+    assert Dialup.Page.navigate_action_name("/foo-bar") == :navigate_foo_bar
+    assert Dialup.Page.navigate_action_name("/foo/bar") == :navigate_foo__bar
+    refute Dialup.Page.navigate_action_name("/foo-bar") == Dialup.Page.navigate_action_name("/foo/bar")
+  end
+
   test "an agent can lock and unlock the human UI", %{pid: pid, token: token} do
     names = rpc(token, 0, "tools/list", %{})["result"]["tools"] |> Enum.map(& &1["name"])
     assert "lock_ui" in names
@@ -154,15 +182,21 @@ defmodule Dialup.AgentHandoffTest do
     assert scene["result"]["structuredContent"]["state"]["count"] == 0
     assert scene["result"]["structuredContent"]["uiLocked"] == true
 
+    # Human navigation is also blocked while locked.
+    UserSessionProcess.navigate(pid, "/board")
+    assert_receive {:send_html, _nav_blocked}
+    locked_scene = rpc(token, 3, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
+    assert locked_scene["result"]["structuredContent"]["path"] == "/"
+
     # Unlocking restores human control.
-    unlocked = rpc(token, 3, "tools/call", %{"name" => "unlock_ui", "arguments" => %{}})
+    unlocked = rpc(token, 4, "tools/call", %{"name" => "unlock_ui", "arguments" => %{}})
     assert unlocked["result"]["structuredContent"]["uiLocked"] == false
     assert_receive {:send_html, unlock_payload}
     assert Jason.decode!(unlock_payload)["ui_locked"] == false
 
     UserSessionProcess.event(pid, "increment", %{"amount" => 4})
     assert_receive {:send_html, _human_update}
-    after_scene = rpc(token, 4, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
+    after_scene = rpc(token, 5, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
     assert after_scene["result"]["structuredContent"]["state"]["count"] == 4
   end
 
