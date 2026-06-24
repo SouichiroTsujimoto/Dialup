@@ -57,30 +57,6 @@ defmodule Dialup.WebSocket do
         Dialup.UserSessionProcess.navigate(state.session_pid, path)
         {:ok, state}
 
-      {:ok,
-       %{
-         "event" => "__agent_approval",
-         "value" => %{"id" => approval_id, "decision" => decision}
-       }} ->
-        Dialup.UserSessionProcess.agent_approval(state.session_pid, approval_id, decision)
-        {:ok, state}
-
-      {:ok, %{"event" => "__focus", "value" => target}} ->
-        Dialup.UserSessionProcess.human_focus(state.session_pid, target)
-        {:ok, state}
-
-      {:ok, %{"event" => "__issue_agent_handoff"}} ->
-        payload =
-          case Dialup.UserSessionProcess.issue_browser_handoff(state.session_pid) do
-            {:ok, handoff} ->
-              %{dialup: "handoff_issued", handoff: handoff}
-
-            {:error, :not_ready} ->
-              %{dialup: "handoff_error", message: "Session is still connecting. Try again."}
-          end
-
-        {:reply, :ok, {:text, Jason.encode!(payload)}, state}
-
       {:ok, %{"event" => event, "value" => value}} ->
         Dialup.UserSessionProcess.event(state.session_pid, event, value)
         {:ok, state}

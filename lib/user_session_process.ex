@@ -32,16 +32,6 @@ defmodule Dialup.UserSessionProcess do
   def issue_agent_grant(pid, opts), do: GenServer.call(pid, {:agent_grant, opts})
   def issue_browser_handoff(pid), do: GenServer.call(pid, :issue_browser_handoff)
 
-  def agent_approval(pid, approval_id, decision),
-    do: GenServer.cast(pid, {:agent_approval, approval_id, decision})
-
-  def human_focus(pid, target), do: GenServer.cast(pid, {:human_focus, target})
-
-  def agent_attach(pid, token, socket_pid),
-    do: GenServer.call(pid, {:agent_attach, token, socket_pid})
-
-  def agent_detach(pid, socket_pid), do: GenServer.cast(pid, {:agent_detach, socket_pid})
-
   @impl GenServer
   def init(%{
         socket_pid: socket_pid,
@@ -73,11 +63,7 @@ defmodule Dialup.UserSessionProcess do
       },
       agent_proxies: %{agent_token => agent_proxy},
       version: 0,
-      audit_log: [],
-      pending_approvals: %{},
-      approval_results: %{},
-      agent_subscribers: %{},
-      human_focus: nil
+      audit_log: []
     }
 
     state =
@@ -133,7 +119,6 @@ defmodule Dialup.UserSessionProcess do
          {:ok,
           %{
             "endpoint" => Dialup.Agent.endpoint(token),
-            "websocket" => Dialup.Agent.websocket_endpoint(token),
             "path" => state.path,
             "version" => state.version,
             "grant" => Dialup.Agent.Grant.public(grant),
@@ -170,43 +155,6 @@ defmodule Dialup.UserSessionProcess do
     end
   end
 
-  def handle_call({:agent_call, token, "focus", %{"target" => target}}, _from, state) do
-    case fetch_grant(state, token) do
-      {:ok, grant} ->
-        page_module = current_page(state)
-
-        if (Dialup.Agent.Grant.allows?(grant, "focus") and page_module) &&
-             Dialup.Agent.target?(page_module, merge_for_render(state), grant, target) do
-          send_focus(state, target, "agent")
-
-          {:reply, {:ok, %{"focused" => target, "version" => state.version}},
-           audit(state, token, "focus", :ok, %{"target" => target})}
-        else
-          {:reply, {:error, :unknown_target}, state}
-        end
-
-      error ->
-        {:reply, error, state}
-    end
-  end
-
-  def handle_call({:agent_call, token, "approval_status", %{"id" => id}}, _from, state) do
-    case fetch_grant(state, token) do
-      {:ok, _grant} ->
-        result =
-          Map.get(state.approval_results, id) ||
-            case Map.get(state.pending_approvals, id) do
-              nil -> %{"id" => id, "status" => "not_found"}
-              approval -> approval_public(approval)
-            end
-
-        {:reply, {:ok, result}, state}
-
-      error ->
-        {:reply, error, state}
-    end
-  end
-
   def handle_call({:agent_call, token, "read_audit_log", _arguments}, _from, state) do
     case fetch_grant(state, token) do
       {:ok, grant} ->
@@ -231,9 +179,7 @@ defmodule Dialup.UserSessionProcess do
     case Map.fetch(state.agent_grants, token) do
       {:ok, grant} ->
         grants = Map.put(state.agent_grants, token, Dialup.Agent.Grant.revoke(grant))
-        state = %{state | agent_grants: grants}
-        state = disconnect_grant_subscribers(state, token)
-        {:reply, :ok, state}
+        {:reply, :ok, %{state | agent_grants: grants}}
 
       :error ->
         {:reply, {:error, :not_found}, state}
@@ -254,18 +200,6 @@ defmodule Dialup.UserSessionProcess do
         opts = page_module.agent_grant(merge_for_render(state))
         {reply, state} = create_agent_grant(state, opts)
         {:reply, reply, audit(state, :human, "issue_agent_handoff", :ok)}
-    end
-  end
-
-  def handle_call({:agent_attach, token, socket_pid}, _from, state) do
-    case fetch_grant(state, token) do
-      {:ok, _grant} ->
-        ref = Process.monitor(socket_pid)
-        subscribers = Map.put(state.agent_subscribers, socket_pid, %{token: token, ref: ref})
-        {:reply, :ok, %{state | agent_subscribers: subscribers}}
-
-      error ->
-        {:reply, error, state}
     end
   end
 
@@ -386,31 +320,6 @@ defmodule Dialup.UserSessionProcess do
     end
   end
 
-  def handle_cast({:agent_approval, approval_id, decision}, state) do
-    {:noreply, resolve_approval(state, approval_id, decision)}
-  end
-
-  def handle_cast({:human_focus, target}, state) do
-    focus = normalize_human_focus(target, state)
-
-    new_state =
-      %{state | human_focus: focus}
-      |> audit(:human, "focus", :ok, focus)
-      |> notify_agents("focus", %{
-        "target" => focus["target"],
-        "targets" => focus["targets"],
-        "selection" => focus,
-        "origin" => "human",
-        "version" => state.version
-      })
-
-    {:noreply, new_state}
-  end
-
-  def handle_cast({:agent_detach, socket_pid}, state) do
-    {:noreply, drop_agent_subscriber(state, socket_pid)}
-  end
-
   # ページ遷移：session は保持、assigns をリセットして page.mount を呼ぶ
   @impl GenServer
   def handle_cast({:navigate, path}, state) do
@@ -434,13 +343,6 @@ defmodule Dialup.UserSessionProcess do
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{monitor_ref: ref} = state) do
     timeout_ref = Process.send_after(self(), :session_timeout, @session_timeout)
     {:noreply, %{state | socket_pid: nil, monitor_ref: nil, timeout_ref: timeout_ref}}
-  end
-
-  def handle_info({:DOWN, ref, :process, pid, _reason} = message, state) do
-    case Map.get(state.agent_subscribers, pid) do
-      %{ref: ^ref} -> {:noreply, drop_agent_subscriber(state, pid)}
-      _ -> delegate_info(message, state)
-    end
   end
 
   def handle_info(:session_timeout, state) do
@@ -467,7 +369,7 @@ defmodule Dialup.UserSessionProcess do
             {:noreply, new_merged} ->
               {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
               new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-              {:noreply, notify_state_changed(new_state)}
+              {:noreply, new_state}
 
             {:update, new_merged} ->
               {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
@@ -478,9 +380,9 @@ defmodule Dialup.UserSessionProcess do
               {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
               new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
               html = to_html(rendered)
-              payload = Jason.encode!(%{target: target, html: html, agent: agent_info(new_state)})
+              payload = Jason.encode!(%{target: target, html: html})
               if state.socket_pid, do: send(state.socket_pid, {:send_html, payload})
-              {:noreply, notify_state_changed(new_state)}
+              {:noreply, new_state}
 
             {:redirect, path, new_merged} ->
               {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
@@ -491,7 +393,7 @@ defmodule Dialup.UserSessionProcess do
               {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
               new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
               send_push_event(new_state, event_name, event_payload)
-              {:noreply, notify_state_changed(new_state)}
+              {:noreply, new_state}
           end
         rescue
           e ->
@@ -719,10 +621,7 @@ defmodule Dialup.UserSessionProcess do
     |> Map.merge(state.assigns)
     |> Map.put(:params, state.params)
     |> Map.put(:current_path, state.path)
-    |> Map.put(:dialup_agent, %{
-      version: state.version,
-      handoff_required: true
-    })
+    |> Map.put(:dialup_agent, %{version: state.version})
   end
 
   # handle_event/handle_info の返り値を session と assigns に分割する
@@ -775,12 +674,12 @@ defmodule Dialup.UserSessionProcess do
   defp update_page(state) do
     if state.socket_pid do
       html = render(state)
-      payload = %{html: html, path: state.path, agent: agent_info(state)}
+      payload = %{html: html, path: state.path}
       payload = put_title(payload, state)
       send(state.socket_pid, {:send_html, Jason.encode!(payload)})
     end
 
-    notify_state_changed(state)
+    state
   end
 
   defp apply_event(page_module, event, value, state) do
@@ -791,7 +690,7 @@ defmodule Dialup.UserSessionProcess do
         {:noreply, new_merged} ->
           {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
           new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-          {:ok, notify_state_changed(new_state)}
+          {:ok, new_state}
 
         {:update, new_merged} ->
           {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
@@ -802,9 +701,9 @@ defmodule Dialup.UserSessionProcess do
           {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
           new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
           html = to_html(rendered)
-          payload = Jason.encode!(%{target: target, html: html, agent: agent_info(new_state)})
+          payload = Jason.encode!(%{target: target, html: html})
           if state.socket_pid, do: send(state.socket_pid, {:send_html, payload})
-          {:ok, notify_state_changed(new_state)}
+          {:ok, new_state}
 
         {:redirect, path, new_merged} ->
           {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
@@ -839,123 +738,37 @@ defmodule Dialup.UserSessionProcess do
       %{
         "token" => token,
         "endpoint" => Dialup.Agent.endpoint(token),
-        "websocket" => Dialup.Agent.websocket_endpoint(token),
         "grant" => Dialup.Agent.Grant.public(grant)
       }}, %{state | agent_grants: grants, agent_proxies: proxies}}
   end
 
   defp current_scene(state, grant) do
-    scene =
-      case current_page(state) do
-        nil ->
-          %{
-            "path" => state.path,
-            "version" => state.version,
-            "state" => %{},
-            "regions" => [],
-            "actions" => []
-          }
-
-        page_module ->
-          Dialup.Agent.scene(
-            page_module,
-            merge_for_render(state),
-            state.path,
-            state.version,
-            grant
-          )
-      end
-
-    Map.put(scene, "humanFocus", state.human_focus)
-  end
-
-  defp normalize_human_focus(target, state) when is_binary(target) do
-    %{
-      "mode" => "semantic",
-      "target" => target,
-      "targets" => [%{"id" => target}],
-      "path" => state.path,
-      "selectedAt" => System.system_time(:millisecond)
-    }
-  end
-
-  defp normalize_human_focus(selection, state) when is_map(selection) do
-    targets =
-      selection
-      |> Map.get("targets", [])
-      |> Enum.take(50)
-      |> Enum.map(fn target ->
+    case current_page(state) do
+      nil ->
         %{
-          "id" => target |> Map.get("id", "") |> to_string() |> String.slice(0, 200),
-          "kind" => target |> Map.get("kind", "unknown") |> to_string() |> String.slice(0, 40),
-          "description" =>
-            target |> Map.get("description", "") |> to_string() |> String.slice(0, 500),
-          "text" => target |> Map.get("text", "") |> to_string() |> String.slice(0, 500),
-          "selector" => target |> Map.get("selector", "") |> to_string() |> String.slice(0, 500),
-          "tag" => target |> Map.get("tag", "") |> to_string() |> String.slice(0, 40),
-          "role" => target |> Map.get("role", "") |> to_string() |> String.slice(0, 80),
-          "rect" => normalize_rect(Map.get(target, "rect"))
+          "path" => state.path,
+          "version" => state.version,
+          "state" => %{},
+          "regions" => [],
+          "actions" => []
         }
-      end)
-      |> Enum.reject(&(&1["id"] == ""))
 
-    primary = List.first(targets)
-
-    %{
-      "mode" => selection |> Map.get("mode", "point") |> to_string() |> String.slice(0, 40),
-      "target" => if(primary, do: primary["id"], else: nil),
-      "targets" => targets,
-      "rectangle" => normalize_rect(Map.get(selection, "rectangle")),
-      "pointer" => normalize_point(Map.get(selection, "pointer")),
-      "viewport" => normalize_viewport(Map.get(selection, "viewport")),
-      "path" => state.path,
-      "selectedAt" => System.system_time(:millisecond)
-    }
+      page_module ->
+        Dialup.Agent.scene(
+          page_module,
+          merge_for_render(state),
+          state.path,
+          state.version,
+          grant
+        )
+    end
   end
-
-  defp normalize_human_focus(_selection, state), do: normalize_human_focus("", state)
-
-  defp normalize_rect(rect) when is_map(rect) do
-    Map.take(rect, ["x", "y", "width", "height", "documentX", "documentY"])
-  end
-
-  defp normalize_rect(_rect), do: nil
-
-  defp normalize_point(point) when is_map(point), do: Map.take(point, ["x", "y"])
-  defp normalize_point(_point), do: nil
-
-  defp normalize_viewport(viewport) when is_map(viewport) do
-    Map.take(viewport, ["width", "height", "scrollX", "scrollY"])
-  end
-
-  defp normalize_viewport(_viewport), do: nil
 
   defp resolve_event(page_module, event) do
     case Dialup.Agent.action(page_module, event) do
       nil -> event
       action -> action.name
     end
-  end
-
-  defp send_focus(state, target, origin \\ "agent") do
-    if state.socket_pid do
-      send(
-        state.socket_pid,
-        {:send_html,
-         Jason.encode!(%{
-           dialup: "focus",
-           target: to_string(target),
-           origin: origin,
-           version: state.version
-         })}
-      )
-    end
-
-    notify_agents(state, "focus", %{
-      "target" => to_string(target),
-      "origin" => origin,
-      "version" => state.version
-    })
   end
 
   defp send_push_event(state, event_name, event_payload) do
@@ -966,23 +779,12 @@ defmodule Dialup.UserSessionProcess do
         html: html,
         path: state.path,
         push_event: event_name,
-        payload: event_payload,
-        agent: agent_info(state)
+        payload: event_payload
       }
 
       payload = put_title(payload, state)
       send(state.socket_pid, {:send_html, Jason.encode!(payload)})
     end
-  end
-
-  defp agent_info(state) do
-    grant = Map.fetch!(state.agent_grants, state.agent_token)
-
-    %{
-      status: "handoff_required",
-      version: state.version,
-      grant: Dialup.Agent.Grant.public(grant)
-    }
   end
 
   defp bump_version(state), do: %{state | version: state.version + 1}
@@ -999,9 +801,10 @@ defmodule Dialup.UserSessionProcess do
            Dialup.Agent.available?(page_module, action.name, merge_for_render(state)) ||
              {:error, :unavailable} do
       if Map.get(action, :confirm) == :human do
-        request_approval(state, token, action, clean_arguments)
+        {{:error, :human_confirmation_required},
+         audit(state, token, name, :human_confirmation_required)}
       else
-        send_focus(state, name)
+        clean_arguments = Map.put(clean_arguments, "_dialup_actor", "agent")
 
         case apply_event(page_module, action.name, clean_arguments, state) do
           {:ok, new_state} ->
@@ -1070,132 +873,6 @@ defmodule Dialup.UserSessionProcess do
     %{state | audit_log: Enum.take([entry | state.audit_log], 100)}
   end
 
-  defp request_approval(state, token, action, arguments) do
-    id = :crypto.strong_rand_bytes(12) |> Base.url_encode64(padding: false)
-
-    approval = %{
-      id: id,
-      token: token,
-      action: action,
-      arguments: arguments,
-      requested_version: state.version,
-      status: "pending",
-      requested_at: System.system_time(:millisecond)
-    }
-
-    send_focus(state, action.name)
-    send_approval_request(state, approval)
-
-    new_state =
-      state
-      |> Map.update!(:pending_approvals, &Map.put(&1, id, approval))
-      |> audit(token, to_string(action.name), :pending_approval, %{"approval_id" => id})
-
-    {{:error, {:approval_required, approval_public(approval)}}, new_state}
-  end
-
-  defp resolve_approval(state, approval_id, decision) do
-    case Map.pop(state.pending_approvals, approval_id) do
-      {nil, _pending} ->
-        state
-
-      {approval, pending} ->
-        state = %{state | pending_approvals: pending}
-
-        if decision in ["approve", "approved", true] do
-          execute_approved(state, approval)
-        else
-          result = %{"id" => approval_id, "status" => "rejected", "version" => state.version}
-
-          state
-          |> put_approval_result(approval_id, result)
-          |> audit(:human, to_string(approval.action.name), :rejected, %{
-            "approval_id" => approval_id
-          })
-          |> notify_agents("approval_resolved", result)
-        end
-    end
-  end
-
-  defp execute_approved(state, approval) do
-    page_module = current_page(state)
-    merged = merge_for_render(state)
-
-    cond do
-      approval.requested_version != state.version ->
-        finish_failed_approval(state, approval, "stale")
-
-      is_nil(page_module) ->
-        finish_failed_approval(state, approval, "page_not_found")
-
-      not Dialup.Agent.available?(page_module, approval.action.name, merged) ->
-        finish_failed_approval(state, approval, "unavailable")
-
-      true ->
-        case apply_event(page_module, approval.action.name, approval.arguments, state) do
-          {:ok, new_state} ->
-            result = %{
-              "id" => approval.id,
-              "status" => "completed",
-              "version" => new_state.version,
-              "scene" => current_scene(new_state, Map.get(new_state.agent_grants, approval.token))
-            }
-
-            new_state
-            |> put_approval_result(approval.id, result)
-            |> audit(:human, to_string(approval.action.name), :approved, %{
-              "approval_id" => approval.id
-            })
-            |> notify_agents("approval_resolved", result)
-
-          {:error, reason} ->
-            finish_failed_approval(state, approval, inspect(reason))
-        end
-    end
-  end
-
-  defp finish_failed_approval(state, approval, reason) do
-    result = %{
-      "id" => approval.id,
-      "status" => "failed",
-      "reason" => reason,
-      "version" => state.version
-    }
-
-    state
-    |> put_approval_result(approval.id, result)
-    |> audit(:human, to_string(approval.action.name), :approval_failed, %{
-      "approval_id" => approval.id,
-      "reason" => reason
-    })
-    |> notify_agents("approval_resolved", result)
-  end
-
-  defp send_approval_request(state, approval) do
-    if state.socket_pid do
-      send(
-        state.socket_pid,
-        {:send_html,
-         Jason.encode!(%{
-           dialup: "approval_requested",
-           approval: approval_public(approval),
-           version: state.version
-         })}
-      )
-    end
-  end
-
-  defp approval_public(approval) do
-    %{
-      "id" => approval.id,
-      "status" => approval.status,
-      "action" => to_string(approval.action.name),
-      "description" => Map.get(approval.action, :desc, to_string(approval.action.name)),
-      "arguments" => approval.arguments,
-      "version" => approval.requested_version
-    }
-  end
-
   defp json_safe_audit(entry) do
     Map.new(entry, fn {key, value} -> {to_string(key), json_safe_value(value)} end)
   end
@@ -1207,57 +884,4 @@ defmodule Dialup.UserSessionProcess do
 
   defp json_safe_value(value) when is_list(value), do: Enum.map(value, &json_safe_value/1)
   defp json_safe_value(value), do: value
-
-  defp notify_agents(state, method, params) do
-    Enum.each(state.agent_subscribers, fn {pid, _subscriber} ->
-      send(pid, {:agent_notification, method, params})
-    end)
-
-    state
-  end
-
-  defp put_approval_result(state, id, result) do
-    results =
-      state.approval_results
-      |> Map.put(id, result)
-      |> Enum.sort_by(fn {_id, value} -> Map.get(value, "version", 0) end, :desc)
-      |> Enum.take(100)
-      |> Map.new()
-
-    %{state | approval_results: results}
-  end
-
-  defp notify_state_changed(state) do
-    Enum.each(state.agent_subscribers, fn {pid, %{token: token}} ->
-      case fetch_grant(state, token) do
-        {:ok, grant} ->
-          send(pid, {:agent_notification, "state_changed", current_scene(state, grant)})
-
-        _ ->
-          :ok
-      end
-    end)
-
-    state
-  end
-
-  defp drop_agent_subscriber(state, socket_pid) do
-    case Map.pop(state.agent_subscribers, socket_pid) do
-      {nil, _subscribers} ->
-        state
-
-      {%{ref: ref}, subscribers} ->
-        Process.demonitor(ref, [:flush])
-        %{state | agent_subscribers: subscribers}
-    end
-  end
-
-  defp disconnect_grant_subscribers(state, token) do
-    state.agent_subscribers
-    |> Enum.filter(fn {_pid, subscriber} -> subscriber.token == token end)
-    |> Enum.reduce(state, fn {pid, _subscriber}, acc ->
-      send(pid, {:agent_notification, "grant_revoked", %{"token" => String.slice(token, 0, 8)}})
-      drop_agent_subscriber(acc, pid)
-    end)
-  end
 end

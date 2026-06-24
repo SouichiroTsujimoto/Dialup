@@ -108,8 +108,7 @@ defmodule Dialup.AgentHandoffTest do
     token: token,
     initial: initial
   } do
-    assert initial["agent"]["status"] == "handoff_required"
-    refute Map.has_key?(initial["agent"], "endpoint")
+    refute Map.has_key?(initial, "agent")
 
     UserSessionProcess.event(pid, "increment", %{"amount" => 2})
     assert_receive {:send_html, _human_update}
@@ -133,22 +132,12 @@ defmodule Dialup.AgentHandoffTest do
         "arguments" => %{"amount" => 3, "_version" => 1}
       })
 
-    assert_receive {:send_html, focus_payload}
-
-    assert Jason.decode!(focus_payload) == %{
-             "dialup" => "focus",
-             "origin" => "agent",
-             "target" => "increment",
-             "version" => 1
-           }
-
     assert_receive {:send_html, _agent_update}
     assert acted["result"]["structuredContent"]["state"]["count"] == 5
     assert acted["result"]["structuredContent"]["version"] == 2
   end
 
-  test "tools/list exposes declarations and human approval resumes the action", %{
-    pid: pid,
+  test "tools/list exposes declarations and confirm=human is unsupported over HTTP", %{
     token: token
   } do
     listed = rpc(token, 1, "tools/list", %{})
@@ -164,22 +153,8 @@ defmodule Dialup.AgentHandoffTest do
       })
 
     assert reset["error"]["code"] == -32_004
-    assert_receive {:send_html, focus_payload}
-    assert Jason.decode!(focus_payload)["target"] == "reset"
-    assert_receive {:send_html, approval_payload}
-    approval = Jason.decode!(approval_payload)["approval"]
-
-    UserSessionProcess.agent_approval(pid, approval["id"], "approve")
-    assert_receive {:send_html, _updated_page}
-
-    status =
-      rpc(token, 3, "tools/call", %{
-        "name" => "approval_status",
-        "arguments" => %{"id" => approval["id"]}
-      })
-
-    assert status["result"]["structuredContent"]["status"] == "completed"
-    assert status["result"]["structuredContent"]["version"] == 1
+    assert reset["error"]["message"] =~ "not supported via HTTP MCP"
+    assert reset["error"]["data"]["confirm"] == "human"
   end
 
   test "component markup carries semantic ids and serialized parameters" do
@@ -209,6 +184,14 @@ defmodule Dialup.AgentHandoffTest do
     assert response["result"]["structuredContent"]["state"]["count"] == 0
   end
 
+  test "agent websocket endpoint is not available", %{token: token} do
+    conn =
+      Plug.Test.conn(:get, "/agent/#{token}/ws")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 404
+  end
+
   test "stale versions and invalid arguments are rejected", %{token: token} do
     stale =
       rpc(token, 1, "tools/call", %{
@@ -226,70 +209,6 @@ defmodule Dialup.AgentHandoffTest do
       })
 
     assert invalid["error"]["code"] == -32_602
-  end
-
-  test "agent subscribers receive human state changes and focus", %{pid: pid, token: token} do
-    assert :ok = UserSessionProcess.agent_attach(pid, token, self())
-
-    UserSessionProcess.human_focus(pid, "counter")
-    assert_receive {:agent_notification, "focus", %{"origin" => "human", "target" => "counter"}}
-
-    UserSessionProcess.event(pid, "increment", %{"amount" => 2})
-    assert_receive {:send_html, _page}
-    assert_receive {:agent_notification, "state_changed", scene}
-    assert scene["state"]["count"] == 2
-  end
-
-  test "human rectangle selections persist in read_scene and notify agents", %{
-    pid: pid,
-    token: token
-  } do
-    assert :ok = UserSessionProcess.agent_attach(pid, token, self())
-
-    selection = %{
-      "mode" => "rectangle",
-      "targets" => [
-        %{
-          "id" => "dom:#summary",
-          "kind" => "dom",
-          "selector" => "#summary",
-          "tag" => "p",
-          "role" => "",
-          "description" => "Counter summary",
-          "text" => "0",
-          "rect" => %{"x" => 20, "y" => 30, "width" => 240, "height" => 100}
-        }
-      ],
-      "rectangle" => %{"x" => 10, "y" => 20, "width" => 280, "height" => 140},
-      "pointer" => %{"x" => 290, "y" => 160},
-      "viewport" => %{"width" => 1280, "height" => 720, "scrollX" => 0, "scrollY" => 0}
-    }
-
-    UserSessionProcess.human_focus(pid, selection)
-
-    assert_receive {:agent_notification, "focus",
-                    %{
-                      "origin" => "human",
-                      "target" => "dom:#summary",
-                      "selection" => %{"mode" => "rectangle"}
-                    }}
-
-    scene = rpc(token, 9, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
-    human_focus = scene["result"]["structuredContent"]["humanFocus"]
-
-    assert human_focus["target"] == "dom:#summary"
-
-    assert human_focus["targets"]
-           |> hd()
-           |> Map.take(["id", "kind", "selector", "tag", "description"]) == %{
-             "id" => "dom:#summary",
-             "kind" => "dom",
-             "selector" => "#summary",
-             "tag" => "p",
-             "description" => "Counter summary"
-           }
-
-    assert human_focus["rectangle"]["width"] == 280
   end
 
   test "grants can be revoked", %{pid: pid, token: token} do
@@ -314,7 +233,6 @@ defmodule Dialup.AgentHandoffTest do
 
     assert "increment" in names
     refute "reset" in names
-    refute "focus" in names
     refute "read_audit_log" in names
 
     scene = rpc(token, 2, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
@@ -334,7 +252,6 @@ defmodule Dialup.AgentHandoffTest do
         "arguments" => %{"amount" => 2, "_version" => 1}
       })
 
-    assert_receive {:send_html, _focus}
     assert_receive {:send_html, _page}
 
     log = rpc(token, 2, "tools/call", %{"name" => "read_audit_log", "arguments" => %{}})
@@ -386,7 +303,7 @@ defmodule Dialup.AgentHandoffTest do
     assert conn.resp_body == ""
   end
 
-  test "ordinary page URLs advertise invisible agent discovery metadata" do
+  test "ordinary page URLs advertise MCP discovery metadata" do
     conn =
       Plug.Test.conn(:get, "/")
       |> Dialup.Server.call(Dialup.Server.init(app: App))
@@ -402,13 +319,11 @@ defmodule Dialup.AgentHandoffTest do
     assert conn.resp_body =~ "A shared counter operated by a human and an agent."
     assert conn.resp_body =~ ~s(rel="service-desc")
     assert conn.resp_body =~ ~s(href="/llms.txt")
-    assert conn.resp_body =~ "This ordinary URL is not the user"
+    assert conn.resp_body =~ "POST /agent/{token}"
     refute conn.resp_body =~ ~s(style="display)
   end
 
-  test "live endpoint repeats page concepts and complete protocol recovery guidance", %{
-    token: token
-  } do
+  test "live endpoint repeats page concepts and HTTP protocol guidance", %{token: token} do
     {:ok, descriptor} = Agent.describe(token)
     discovery = descriptor["agentDiscovery"]
 
@@ -416,13 +331,12 @@ defmodule Dialup.AgentHandoffTest do
              "A shared counter operated by a human and an agent."
 
     assert discovery["connection"]["status"] == "connected"
-    assert discovery["connection"]["sessionOrigin"] == "user_handoff_capability"
     assert discovery["connection"]["endpoint"] == "/agent/#{token}"
+    refute Map.has_key?(discovery["connection"], "websocket")
     assert discovery["protocolGuide"]["transport"]["http"] =~ "/agent/#{token}"
     assert discovery["protocolGuide"]["versioning"]["staleError"] == -32_009
     assert discovery["protocolGuide"]["versioning"]["recovery"] =~ "read_scene"
-    assert discovery["protocolGuide"]["expiryRecovery"] =~ "ask the user"
-    assert discovery["protocolGuide"]["humanFirst"] =~ "illustrative"
+    assert discovery["protocolGuide"]["humanConfirmation"] =~ "confirm=human"
   end
 
   test "well-known discovery explains concepts and operations without a live token" do
@@ -436,34 +350,33 @@ defmodule Dialup.AgentHandoffTest do
     assert discovery["message"]["concept"] ==
              "A shared counter operated by a human and an agent."
 
-    assert discovery["connection"]["status"] == "no_user_session_capability"
-    assert discovery["accessModel"]["ordinaryUrl"] =~ "not authority"
-    assert discovery["accessModel"]["decisionRule"] =~ "Hand off to AI"
-    assert discovery["accessModel"]["suggestedReply"] =~ "セッション引き継ぎURL"
-    assert discovery["accessModel"]["sessionIsolation"] =~ "does not attach"
+    assert discovery["connection"]["status"] == "no_live_session"
+    assert discovery["accessModel"]["pageUrl"] =~ "does not authenticate"
+    assert discovery["accessModel"]["sessionToken"] =~ "/agent/"
     assert length(discovery["agentQuickstart"]["steps"]) >= 6
-    assert discovery["agentQuickstart"]["approvalSemantics"] =~ "confirm=human"
+    assert discovery["agentQuickstart"]["humanConfirmation"] =~ "confirm=human"
     assert Enum.any?(discovery["scene"]["actions"], &(&1["name"] == "increment"))
     assert hd(discovery["scene"]["regions"])["name"] == "counter"
   end
 
-  test "llms.txt explains URL-only discovery" do
+  test "llms.txt explains HTTP MCP discovery" do
     conn =
       Plug.Test.conn(:get, "/llms.txt")
       |> Dialup.Server.call(Dialup.Server.init(app: App))
 
     assert conn.status == 200
-    assert conn.resp_body =~ "does NOT grant access"
-    assert conn.resp_body =~ "Hand off to AI"
-    assert conn.resp_body =~ "/agent/"
+    assert conn.resp_body =~ "HTTP JSON-RPC"
     assert conn.resp_body =~ "tools/list"
+    assert conn.resp_body =~ "tools/call"
     assert conn.resp_body =~ "_version"
+    assert conn.resp_body =~ "confirm=human"
   end
 
-  test "a human can issue a fresh handoff capability for the current session", %{pid: pid} do
+  test "a human can issue a fresh session token for the current session", %{pid: pid} do
     assert {:ok, handoff} = UserSessionProcess.issue_browser_handoff(pid)
     assert handoff["endpoint"] =~ ~r{^/agent/[^/]+$}
     assert handoff["grant"]["requireVersion"]
+    refute Map.has_key?(handoff, "websocket")
 
     token = handoff["token"]
     read = rpc(token, 1, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
@@ -474,21 +387,6 @@ defmodule Dialup.AgentHandoffTest do
     assert Enum.any?(log["result"]["structuredContent"]["entries"], fn entry ->
              entry["actor"] == "human" and entry["action"] == "issue_agent_handoff"
            end)
-  end
-
-  test "browser websocket returns a newly issued handoff URL", %{pid: pid} do
-    message = Jason.encode!(%{"event" => "__issue_agent_handoff", "value" => %{}})
-
-    assert {:reply, :ok, {:text, payload}, _state} =
-             Dialup.WebSocket.handle_in(
-               {message, [opcode: :text]},
-               %{session_pid: pid, session_id: "test"}
-             )
-
-    response = Jason.decode!(payload)
-    assert response["dialup"] == "handoff_issued"
-    assert response["handoff"]["endpoint"] =~ ~r{^/agent/[^/]+$}
-    assert response["handoff"]["grant"]["expiresInMs"] > 0
   end
 
   test "same-session HTTP handoff endpoint issues a capability", %{
@@ -505,6 +403,7 @@ defmodule Dialup.AgentHandoffTest do
     assert conn.status == 200
     handoff = Jason.decode!(conn.resp_body)
     assert handoff["endpoint"] =~ ~r{^/agent/[^/]+$}
+    refute Map.has_key?(handoff, "websocket")
   end
 
   test "HTTP handoff endpoint rejects a tab from another cookie session", %{

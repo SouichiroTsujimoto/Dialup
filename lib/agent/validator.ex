@@ -71,12 +71,17 @@ defmodule Dialup.Agent.Validator do
             []
 
           {:ok, value} ->
-            {type, _opts} = normalize_spec(spec)
+            {type, opts} = normalize_spec(spec)
 
-            if valid_type?(type, value) do
-              []
-            else
-              [%{"field" => key, "message" => "must be #{type}"}]
+            cond do
+              not valid_type?(type, value) ->
+                [%{"field" => key, "message" => "must be #{type}"}]
+
+              Keyword.has_key?(opts, :enum) and value not in Keyword.fetch!(opts, :enum) ->
+                [%{"field" => key, "message" => "must be one of the declared enum values"}]
+
+              true ->
+                []
             end
         end
       end)

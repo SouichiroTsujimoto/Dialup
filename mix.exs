@@ -12,7 +12,7 @@ defmodule Dialup.MixProject do
 
       # ドキュメント生成設定
       name: "Dialup",
-      description: "WebSocket-first, file-based routing Elixir framework",
+      description: "WebSocket-first Elixir framework with auto-generated HTTP MCP APIs",
       source_url: "https://github.com/SouichiroTsujimoto/Dialup",
       homepage_url: "https://dialup-framework.org",
       docs: [
@@ -27,6 +27,7 @@ defmodule Dialup.MixProject do
           "guides/lifecycle.md",
           "guides/events.md",
           "guides/agent-native-app-development.md",
+          "guides/mcp-api.md",
           "guides/agent-handoff.md",
           "guides/helpers.md",
           "guides/testing.md",
@@ -36,7 +37,7 @@ defmodule Dialup.MixProject do
         groups_for_extras: [
           Guides: ~w(guides/getting-started.md guides/routing.md guides/state-management.md
                      guides/lifecycle.md guides/events.md guides/agent-native-app-development.md
-                     guides/agent-handoff.md guides/helpers.md
+                     guides/mcp-api.md guides/agent-handoff.md guides/helpers.md
                      guides/testing.md guides/telemetry.md guides/deployment.md)
         ]
       ]
@@ -69,7 +70,7 @@ defmodule Dialup.MixProject do
   defp package do
     [
       name: :dialup,
-      description: "WebSocket-first, file-based routing Elixir framework",
+      description: "WebSocket-first Elixir framework with auto-generated HTTP MCP APIs",
       licenses: ["MIT"],
       links: %{
         "Website" => "https://dialup-framework.org",

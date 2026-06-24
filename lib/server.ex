@@ -89,31 +89,26 @@ defmodule Dialup.Server do
 
   get "/llms.txt" do
     body = """
-    # Dialup Agent Discovery
+    # Dialup MCP API
 
-    This site supports human/AI co-driving of one live server-side session.
+    Dialup pages auto-generate an MCP-compatible HTTP JSON-RPC API from UI declarations.
 
-    Important access model:
-    - An ordinary page URL explains the app but does NOT grant access to the user's current session.
-    - Opening it in another browser creates/selects a different browser-tab session.
-    - A URL containing /agent/ is a short-lived bearer capability for one existing session.
+    Discovery:
+    1. Read the HTTP Link header or HTML meta `dialup-agent-discovery`.
+    2. Fetch `/.well-known/dialup-agent?path=<URL-encoded-path>` for page concepts and tool catalog.
+    3. Obtain a session bearer token (POST `/_dialup/agent-handoff?tab_id=...` from the live browser tab, or use a server-issued grant).
+    4. POST JSON-RPC 2.0 to `/agent/{token}` with `Content-Type: application/json`.
 
-    When a user asks you to continue or assist with work already open in their browser:
-    1. Read the HTTP Link header or the HTML link/meta named dialup-agent-discovery.
-    2. Fetch /.well-known/dialup-agent?path=<URL-encoded-path>.
-    3. If they supplied only the ordinary URL, ask them to click "Hand off to AI" on
-       their open page and send the generated URL containing /agent/.
-    4. Do not open the ordinary URL yourself and claim it is the user's existing session.
-    5. Use the generated /agent/ URL for JSON-RPC 2.0 / MCP tools.
-    6. Call initialize, tools/list, read_scene, focus, then the selected action.
-    7. Pass the latest _version to mutations and respect confirm=human.
+    Standard flow:
+    - initialize
+    - tools/list
+    - tools/call read_scene
+    - tools/call <action> with the latest `_version` in arguments
 
-    Suggested user-facing reply:
-    このURLは通常のページURLなので、現在の作業セッションには接続できません。
-    ページ上の「AIに引き継ぐ」を押し、発行された /agent/ を含むURLを送ってください。
-
-    The discovery document contains page-specific concepts, expected goals, action risk,
-    side effects, reversibility, examples, and success criteria.
+    Notes:
+    - Human UI uses WebSocket (`/ws`). Agent tools use HTTP request-response only.
+    - Actions marked `confirm=human` are not executable via HTTP MCP.
+    - On stale version errors (-32009), call read_scene and retry with the returned version.
     """
 
     conn
@@ -143,6 +138,10 @@ defmodule Dialup.Server do
     end
   end
 
+  get "/agent/:token/ws" do
+    send_json(conn, 404, %{"error" => "Agent WebSocket transport is not supported. Use HTTP JSON-RPC."})
+  end
+
   get "/agent/:token" do
     case Dialup.Agent.describe(token) do
       {:ok, descriptor} ->
@@ -153,16 +152,6 @@ defmodule Dialup.Server do
 
       {:error, :grant_expired} ->
         send_json(conn, 410, %{"error" => "Grant has expired or was revoked"})
-    end
-  end
-
-  get "/agent/:token/ws" do
-    with {:ok, _pid} <- Dialup.Agent.lookup(token) do
-      conn
-      |> WebSockAdapter.upgrade(Dialup.AgentWebSocket, %{token: token}, timeout: :infinity)
-      |> halt()
-    else
-      _ -> send_resp(conn, 404, "Session is no longer available")
     end
   end
 
@@ -379,7 +368,7 @@ defmodule Dialup.Server do
         ~s(<link rel="service-desc" type="application/vnd.dialup.agent+json" href="#{href}">),
         ~s(<link rel="help" type="text/plain" href="/llms.txt">),
         ~s(<meta name="dialup-agent-discovery" content="#{href}">),
-        ~s(<meta name="ai-agent-instructions" content="This ordinary URL is not the user's live session capability. Read #{href}. For existing work, ask the user to click Hand off to AI and send the generated /agent/ URL.">),
+        ~s(<meta name="ai-agent-instructions" content="Read #{href} for MCP tool catalog. Use POST /agent/{token} for JSON-RPC tools/list and tools/call.">),
         ~s(<script id="dialup-agent-context" type="application/json">),
         safe_json(discovery),
         "</script>"

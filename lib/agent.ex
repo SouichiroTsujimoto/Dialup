@@ -2,15 +2,14 @@ defmodule Dialup.Agent do
   @moduledoc """
   JSON-RPC/MCP projection for a live Dialup browser session.
 
-  Each session receives an unguessable handoff endpoint. Calls made through that endpoint
-  are serialized by the same session process that handles browser events.
+  Agent tools are generated from page UI declarations and served over HTTP JSON-RPC at
+  `POST /agent/:token`. See `guides/mcp-api.md` for the full reference.
   """
 
   alias Dialup.UserSessionProcess
   @protocol_version "2025-11-25"
 
   def endpoint(token), do: "/agent/#{token}"
-  def websocket_endpoint(token), do: "/agent/#{token}/ws"
 
   def describe(token) do
     with {:ok, pid} <- lookup(token) do
@@ -83,26 +82,6 @@ defmodule Dialup.Agent do
         "inputSchema" => %{"type" => "object", "properties" => %{}}
       },
       %{
-        "name" => "focus",
-        "description" =>
-          "Show the human which semantic action or region the agent is targeting. " <>
-            "The latest human click or rectangle selection is returned by read_scene.humanFocus.",
-        "inputSchema" => %{
-          "type" => "object",
-          "properties" => %{"target" => %{"type" => "string"}},
-          "required" => ["target"]
-        }
-      },
-      %{
-        "name" => "approval_status",
-        "description" => "Read the result of a pending human approval",
-        "inputSchema" => %{
-          "type" => "object",
-          "properties" => %{"id" => %{"type" => "string"}},
-          "required" => ["id"]
-        }
-      },
-      %{
         "name" => "read_audit_log",
         "description" => "Read the ordered human and agent action log",
         "inputSchema" => %{"type" => "object", "properties" => %{}}
@@ -146,7 +125,6 @@ defmodule Dialup.Agent do
         Enum.filter(builtins, fn tool ->
           case tool["name"] do
             "read_scene" -> grant.projections != []
-            "approval_status" -> true
             name -> Dialup.Agent.Grant.allows?(grant, name)
           end
         end)
@@ -165,9 +143,7 @@ defmodule Dialup.Agent do
 
     actions =
       tools(page_module, assigns, grant)
-      |> Enum.reject(
-        &(&1["name"] in ["read_scene", "focus", "approval_status", "read_audit_log"])
-      )
+      |> Enum.reject(&(&1["name"] in ["read_scene", "read_audit_log"]))
       |> Enum.map(fn tool ->
         %{
           "name" => tool["name"],
@@ -217,50 +193,35 @@ defmodule Dialup.Agent do
       "message" => json_safe(message),
       "scene" => scene(page_module, assigns, path, 0),
       "accessModel" => %{
-        "ordinaryUrl" =>
-          "This URL describes the application, but it is not authority to access the " <>
-            "user's current browser session.",
-        "handoffUrl" =>
-          "A URL whose path starts with /agent/ is a short-lived capability for one " <>
-            "specific live browser session.",
-        "sessionIsolation" =>
-          "Opening the ordinary URL in the agent's own browser creates or selects that " <>
-            "browser tab's session. It does not attach to work already open in the user's browser.",
-        "decisionRule" =>
-          "If the user asks to continue, inspect, or operate work already open in their browser " <>
-            "and supplied only an ordinary URL, stop and ask them to click the site's " <>
-            "\"Hand off to AI\" control and send the generated handoff URL.",
-        "suggestedReply" =>
-          "このURLは通常のページURLなので、現在ブラウザで開いている作業セッションには接続できません。" <>
-            "ページ上の「AIに引き継ぐ」を押して発行されたセッション引き継ぎURL（/agent/ を含むURL）を送ってください。",
+        "pageUrl" =>
+          "The ordinary page URL exposes the tool catalog but does not authenticate an agent " <>
+            "to a live browser session.",
+        "sessionToken" =>
+          "POST JSON-RPC to `/agent/{token}` with a bearer token issued for one live session.",
+        "tokenSources" => [
+          "POST `/_dialup/agent-handoff?tab_id=...` from the user's open browser tab",
+          "Server-side `Dialup.Session.grant/2` for programmatic access"
+        ],
         "security" =>
-          "Treat a handoff URL as a bearer credential. Ask the user to share it only with the " <>
-            "intended agent, do not publish it, and expect it to expire."
+          "Treat session tokens as bearer credentials. They expire and can be revoked."
       },
       "connection" => %{
-        "status" => "no_user_session_capability",
+        "status" => "no_live_session",
         "instructions" =>
-          "Do not claim access to the user's existing session from this ordinary URL. " <>
-            "For an existing-work handoff, request a generated /agent/ URL from the user. " <>
-            "Open this ordinary URL yourself only when starting a separate new session is intended.",
+          "Obtain a session token, then POST JSON-RPC 2.0 to the HTTP MCP endpoint.",
         "httpEndpointTemplate" => "/agent/{session-token}",
-        "websocketEndpointTemplate" => "/agent/{session-token}/ws",
         "protocolVersion" => @protocol_version
       },
       "agentQuickstart" => %{
-        "goal" =>
-          "First determine whether the user wants their existing browser session or a new session.",
+        "goal" => "Operate the live session through HTTP request-response MCP tools.",
         "steps" => [
-          "Classify the request: continue existing browser work, or start a separate new session.",
-          "For existing work, require a generated URL containing /agent/; an ordinary URL is insufficient.",
-          "If only an ordinary URL was supplied, explain the isolation and ask the user to click \"Hand off to AI\".",
-          "After the user supplies the handoff URL, treat it as a sensitive short-lived capability.",
-          "Use connection.endpoint as the JSON-RPC HTTP endpoint.",
-          "Call initialize, tools/list, then read_scene.",
-          "Use action _meta to judge risk, reversibility, approval, examples, and success.",
-          "Use the current scene version in every mutating action.",
-          "Call focus before a visible action when a human is present.",
-          "Verify success with read_scene or the action result."
+          "Fetch this discovery document for page concepts and the static tool catalog.",
+          "Obtain a session bearer token for the target live session.",
+          "POST initialize to `/agent/{token}`.",
+          "POST tools/list to read generated tools from page declarations.",
+          "POST tools/call read_scene to read the current semantic scene and version.",
+          "POST tools/call for mutating actions with the latest `_version` in arguments.",
+          "On stale version errors (-32009), call read_scene and retry."
         ],
         "jsonRpcRequestShape" => %{
           "jsonrpc" => "2.0",
@@ -268,17 +229,9 @@ defmodule Dialup.Agent do
           "method" => "tools/call",
           "params" => %{"name" => "TOOL_NAME", "arguments" => %{}}
         },
-        "sessionExpiry" =>
-          "If a handoff URL expires, ask the user to issue a fresh handoff URL from the " <>
-            "still-open page. Do not reload the ordinary URL and claim it is the same session.",
-        "approvalSemantics" =>
-          "confirm=human means the call creates a pending approval. Never bypass it. " <>
-            "Wait for the human and query approval_status.",
-        "spatialHandoff" =>
-          "A human can click AIに場所を伝える and select one element or drag a rectangle " <>
-            "across several elements. Semantic regions/actions are preferred; ordinary DOM " <>
-            "elements include a selector and coordinates. Read the latest selection from " <>
-            "read_scene.humanFocus; connected WebSockets also receive a focus notification."
+        "humanConfirmation" =>
+          "Actions marked confirm=human are not executable via HTTP MCP. " <>
+            "They require the human browser UI."
       },
       "protocolGuide" => protocol_guide()
     }
@@ -291,15 +244,12 @@ defmodule Dialup.Agent do
       ["connection"],
       %{
         "status" => "connected",
-        "sessionOrigin" => "user_handoff_capability",
         "endpoint" => endpoint(token),
-        "websocket" => websocket_endpoint(token),
         "stateVersion" => version,
         "grant" => Dialup.Agent.Grant.public(grant),
         "protocolVersion" => @protocol_version,
         "instructions" =>
-          "POST JSON-RPC requests to endpoint. Use websocket for state_changed, focus, " <>
-            "approval_resolved, and grant_revoked notifications."
+          "POST JSON-RPC 2.0 requests to endpoint with Content-Type: application/json."
       }
     )
     |> Map.put("protocolGuide", protocol_guide(token))
@@ -324,7 +274,7 @@ defmodule Dialup.Agent do
     action_names =
       tools(page_module, assigns, grant)
       |> Enum.map(& &1["name"])
-      |> Enum.reject(&(&1 in ["read_scene", "focus", "approval_status", "read_audit_log"]))
+      |> Enum.reject(&(&1 in ["read_scene", "read_audit_log"]))
 
     region_names =
       if Dialup.Agent.Grant.projects?(grant, :regions) and
@@ -416,8 +366,10 @@ defmodule Dialup.Agent do
       {:error, {:invalid_arguments, errors}} ->
         {:error, -32_602, "Invalid tool arguments", %{"errors" => errors}}
 
-      {:error, {:approval_required, approval}} ->
-        {:error, -32_004, "Action requires human confirmation", approval}
+      {:error, :human_confirmation_required} ->
+        {:error, -32_004,
+         "Action requires human confirmation and is not supported via HTTP MCP",
+         %{"confirm" => "human"}}
 
       {:error, reason} ->
         {:error, -32_000, Exception.format_exit(reason)}
@@ -521,11 +473,7 @@ defmodule Dialup.Agent do
 
     %{
       "transport" => %{
-        "http" => "POST #{endpoint} with Content-Type: application/json",
-        "websocket" =>
-          "Connect to #{websocket_endpoint(token)} for the same RPC methods plus push notifications.",
-        "websocketPurpose" =>
-          "Use push notifications to observe human state changes and approval results without polling."
+        "http" => "POST #{endpoint} with Content-Type: application/json"
       },
       "requests" => %{
         "initialize" => %{
@@ -559,11 +507,9 @@ defmodule Dialup.Agent do
             "then issue a new action with the returned version."
       },
       "expiryRecovery" =>
-        "If this handoff endpoint returns expired/revoked, ask the user to issue a fresh " <>
-          "handoff URL from their still-open page. Opening the ordinary URL creates a different session.",
-      "humanFirst" =>
-        "A human action shown in the UI may be an illustrative demo step. Follow the " <>
-          "page-specific agent message to determine whether it is required."
+        "If the session token expires or is revoked, obtain a fresh token from the live session.",
+      "humanConfirmation" =>
+        "confirm=human actions return error -32004 over HTTP MCP. Use the human browser UI instead."
     }
   end
 end

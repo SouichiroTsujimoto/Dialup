@@ -1,17 +1,10 @@
 #!/usr/bin/env python3
 import json
 import sys
-import time
 import urllib.request
 
 
-def call(endpoint, request_id, name, arguments=None):
-    payload = {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": "tools/call",
-        "params": {"name": name, "arguments": arguments or {}},
-    }
+def post(endpoint, payload):
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(payload).encode(),
@@ -22,16 +15,46 @@ def call(endpoint, request_id, name, arguments=None):
         return json.load(response)
 
 
+def tools_call(endpoint, request_id, name, arguments=None):
+    return post(
+        endpoint,
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments or {}},
+        },
+    )
+
+
 if len(sys.argv) != 2:
     raise SystemExit("usage: python3 agent.py http://localhost:4100/agent/TOKEN")
 
 endpoint = sys.argv[1]
-scene = call(endpoint, 1, "read_scene")
-print("Observed shared state:", json.dumps(scene["result"]["structuredContent"], indent=2))
-version = scene["result"]["structuredContent"]["version"]
 
-call(endpoint, 2, "focus", {"target": "item_list"})
-time.sleep(1)
+post(
+    endpoint,
+    {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "handoff-demo", "version": "1"},
+        },
+    },
+)
 
-result = call(endpoint, 3, "add_item", {"sku": "AI-ITEM", "qty": 2, "_version": version})
-print("AI action complete:", json.dumps(result["result"]["structuredContent"], indent=2))
+tools = post(endpoint, {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+print("Tools:", [tool["name"] for tool in tools["result"]["tools"]])
+
+scene = tools_call(endpoint, 2, "read_scene")
+content = scene["result"]["structuredContent"]
+print("Scene:", json.dumps(content, indent=2))
+version = content["version"]
+
+result = tools_call(
+    endpoint, 3, "add_item", {"sku": "AI-ITEM", "qty": 2, "_version": version}
+)
+print("After add_item:", json.dumps(result["result"]["structuredContent"], indent=2))

@@ -44,8 +44,8 @@ defmodule Dialup.Page do
   - `agent_state/1` — returns the allowlisted state projection visible to an attached agent.
   - `agent_message/1` — explains the page concept, operating flow, and safety constraints
     to an agent that has no source-code context.
-  - `agent_grant/1` — defines capabilities, projections, approval policy, expiry, and
-    version requirements for handoff URLs.
+  - `agent_grant/1` — defines capabilities, projections, expiry, and version requirements
+    for HTTP MCP session tokens.
 
   ## Human and agent projections
 
@@ -303,12 +303,11 @@ defmodule Dialup.Page do
 
       def agent_message(_assigns) do
         %{
-          purpose: "This is a Dialup application with a shared human and AI session.",
+          purpose: "This Dialup page exposes MCP tools generated from its UI declarations.",
           instructions: [
             "Read the semantic scene before acting.",
             "Use the returned state version for every mutating action.",
-            "Call focus before acting when a human is watching.",
-            "Actions marked confirm=human require approval in the browser."
+            "Actions marked confirm=human are not executable via HTTP MCP."
           ]
         }
       end
@@ -317,7 +316,6 @@ defmodule Dialup.Page do
         %{
           capabilities: :all,
           projections: [:state, :regions, :actions],
-          approval: :per_action,
           expires_in: :timer.minutes(15),
           require_version: true
         }

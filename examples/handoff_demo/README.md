@@ -1,4 +1,4 @@
-# Human → AI handoff demo
+# HTTP MCP demo
 
 Start the app:
 
@@ -8,25 +8,32 @@ mix deps.get
 mix run --no-halt
 ```
 
-Open <http://localhost:4100>, optionally click **Add HUMAN-ITEM**, then click
-**AIに引き継ぐ / Hand off to AI** at the bottom-right and copy the generated session URL
-from the page. Pass that URL to the bundled agent:
+Open <http://localhost:4100>. The page mints a scoped agent token at startup (see browser devtools
+or server logs). Pass the endpoint to the bundled Python client:
 
 ```bash
 python3 agent.py http://localhost:4100/agent/TOKEN
 ```
 
-The agent reads the state created by the human, focuses the invoice region in the browser,
-and adds `AI-ITEM` to the same live session. The browser updates without a reload.
+The agent reads the live scene, calls `add_item` over HTTP JSON-RPC, and the browser updates
+without a reload — the same `handle_event/3` path as a human click.
 
-The page grant expires after 15 minutes. `Submit` demonstrates the approval gate: an agent
-call opens a browser dialog, and the pending action runs only after the human approves it.
+`Submit` uses `confirm: :human`. Over HTTP MCP it returns error `-32004`; use the browser button
+for that operation.
 
-The normal page URL also advertises an invisible agent discovery document:
+## Discovery
 
 ```bash
 curl 'http://localhost:4100/.well-known/dialup-agent?path=%2F'
+curl 'http://localhost:4100/llms.txt'
 ```
 
-Its message explains the demo concept, the difference between ordinary and handoff URLs,
-and the recommended operation sequence.
+## API shape
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"read_scene","arguments":{}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"add_item","arguments":{"sku":"AI-ITEM","qty":2,"_version":0}}}
+```
+
+See [HTTP MCP API](../../guides/mcp-api.md) for the full reference.
