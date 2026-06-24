@@ -1,22 +1,36 @@
 # Dialup (日本語)
 
-WebSocket-first, file-based routing Elixir framework.
+**WebSocket-first のライブ UI** と **自動生成される HTTP MCP API** を備えた、ファイルベースルーティングの Elixir フレームワーク。
 
 [English](./README.md)
 
 ## 概要
 
-Dialupは、Next.jsのような開発体験でWebSocketファーストのアプリケーションを構築できるElixirフレームワークです。
+Dialup は Next.js のような開発体験でライブアプリを構築できる Elixir フレームワークです。
+中核は二つあります。人間向け UI は最初から WebSocket-first で動き、HTTP MCP API は同じページ宣言から自動生成されます。
+各ページは 1 つの監視されたサーバー側アクターです。UI を `<.dialup_action>` と
+`<.dialup_region>` で書くと、Dialup が `tools/list`、`tools/call`、`read_scene` を導出します。
+REST API の二重実装は不要です。
+
+```
+人間ブラウザ  ──WebSocket──►  UserSessionProcess  ◄──HTTP JSON-RPC──  AI エージェント
+                                      │
+                               handle_event/3
+                                      │
+                          declare_action / dialup_action
+```
 
 ### 特徴
 
-- **ファイルベースルーティング** — ファイル配置がそのままURLになります
-- **WebSocketファースト** — リアルタイム通信を標準でサポート
-- **サーバーサイドステート** — クライアント側の状態管理が不要
-- **シンプルなアーキテクチャ** — Phoenix/LiveViewより軽量
-- **コロケーションCSS** — `.ex`ファイルの隣に`.css`を置くだけ、コンパイル時に自動スコープ化
-- **静的ファイル配信** — `priv/static/`を自動で配信
-- **WebSocket origin検証** — クロスオリジン接続をビルトインで保護
+- **WebSocket-first の人間 UI** — `/ws` と idiomorph によるライブ DOM 更新
+- **自動生成される HTTP MCP API** — action / region 宣言がそのままエージェントツールになる
+- **同じイベント経路** — ブラウザ操作とエージェントの `tools/call` が `handle_event/3` を共有
+- **HTTP MCP** — `POST /agent/:token` で `initialize` / `tools/list` / `tools/call`
+- **エージェント向け discovery** — `/.well-known/dialup-agent`、ページ埋め込み、`/llms.txt`
+- **スコープ付きセッショントークン** — 有効期限・投影・ capability を細かく制御
+- **ファイルベースルーティング** — ファイル配置がそのまま URL になる
+- **サーバーサイドステート** — 1 タブ = 1 `UserSessionProcess`
+- **コロケーション CSS** — `.ex` の隣に `.css`、コンパイル時に自動スコープ化
 
 ## クイックスタート
 
@@ -37,86 +51,63 @@ mix run --no-halt
 
 http://localhost:4000 にアクセス
 
-### 生成されるプロジェクト構成
-
-```
-my_app/
-├── mix.exs
-├── lib/
-│   ├── my_app.ex          # Applicationエントリポイント
-│   ├── root.html.heex     # HTMLシェル（<head>・hooks・analyticsをカスタマイズ）
-│   └── app/
-│       ├── layout.ex / layout.css   # ルートレイアウト
-│       ├── page.ex   / page.css     # ホームページ（/）
-│       └── error.ex  / error.css    # エラーページ（404・500）
-└── priv/static/           # 静的ファイル（画像・フォント・favicon）
-```
-
-### 最小構成のアプリ
+### エージェント対応ページの最小例
 
 ```elixir
-# lib/my_app.ex
-defmodule MyApp do
-  use Application
-  use Dialup, app_dir: __DIR__ <> "/app"
-
-  def start(_type, _args) do
-    children = [
-      {Dialup, app: __MODULE__, port: 4000}
-    ]
-    Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__.Supervisor)
-  end
-end
-```
-
-```elixir
-# lib/app/page.ex
 defmodule Dialup.App.Page do
   use Dialup.Page
 
-  def mount(_params, assigns) do
-    {:ok, assigns |> set_default(%{count: 0})}
-  end
+  declare_action name: :increment, desc: "カウンタを増やす", params: %{}
 
-  def handle_event("increment", _value, assigns) do
-    {:update, assigns |> overwrite(%{count: assigns.count + 1})}
+  def mount(_params, assigns), do: {:ok, Map.put(assigns, :count, 0)}
+  def agent_state(assigns), do: %{count: assigns.count}
+
+  def handle_event(:increment, _, assigns) do
+    {:update, Map.update!(assigns, :count, &(&1 + 1))}
   end
 
   def render(assigns) do
     ~H"""
-    <h1>Hello Dialup</h1>
     <p>Count: {@count}</p>
-    <button ws-event="increment">+</button>
+    <.dialup_action name={:increment}>+1</.dialup_action>
     """
   end
 end
 ```
 
+同じ `<.dialup_action>` が、ブラウザでは WebSocket 経由のボタンになり、エージェントには生成された MCP ツールとして見えます。
+ブラウザで操作することも、トークンを取得して API を呼び出すこともできます（詳細は [HTTP MCP API](./guides/mcp-api.md)）:
+
+```bash
+curl -X POST http://localhost:4000/agent/TOKEN \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_scene","arguments":{}}}'
+```
+
 ## ドキュメント
 
-詳細なガイドは `mix docs --open` で参照してください。
+`mix docs --open` で全文を参照できます。
 
-ガイドのドキュメント本体は `guides/` にあります：
+- [Events](./guides/events.md) — **WebSocket-first UI のイベントと更新**
+- [HTTP MCP API](./guides/mcp-api.md) — **ツール自動生成・discovery・バージョニング**
+- [Agent-native アプリ開発](./guides/agent-native-app-development.md) — 実装ワークフロー
+- [セッショントークン](./guides/agent-handoff.md) — ライブセッションへの接続
+- [Getting Started](./guides/getting-started.md) — インストールと基本
 
-- [Getting Started](./guides/getting-started.md) — インストールと基本的な使い方
-- [Routing](./guides/routing.md) — ルーティングの詳細
-- [State Management](./guides/state-management.md) — 状態管理
-- [Lifecycle](./guides/lifecycle.md) — ページライフサイクル
-- [Events](./guides/events.md) — イベント処理
-- [Helpers](./guides/helpers.md) — ヘルパー関数
-- [Deployment](./guides/deployment.md) — デプロイ方法
-- [Fullstack Example](./guides/fullstack-example.md) — EctoとPubSubを用いた実践的なアプリケーション例
+その他は `guides/` を参照（ルーティング、状態管理、デプロイなど）。
 
 ## アーキテクチャ
 
 ```
-Browser          Elixir Server
-   |                    |
-dialup.js ←──WS──→ UserSessionProcess (1タブ = 1プロセス)
-   |                    |
-idiomorph            render/1
-                        |
-                     assigns (state)
+Browser (人間)      AI agent (MCP client)
+     |                      |
+dialup.js ──WS──► UserSessionProcess ◄──POST /agent/:token──
+     |                      |
+ idiomorph              render/1 + handle_event/3
+                             |
+                    declare_action / dialup_region
+                             │
+                      tools/list (HTTP)
 ```
 
 ## ライセンス

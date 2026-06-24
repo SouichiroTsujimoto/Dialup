@@ -1,6 +1,6 @@
 # Dialup (English)
 
-WebSocket-first, file-based routing Elixir framework.
+**WebSocket-first apps** and **auto-generated HTTP MCP APIs** in one file-based Elixir framework.
 
 [日本語](./README.ja.md)
 
@@ -11,17 +11,32 @@ WebSocket-first, file-based routing Elixir framework.
 
 ## Overview
 
-Dialup is an Elixir framework for building WebSocket-first applications with a Next.js-like developer experience.
+Dialup is an Elixir framework for building live applications with a Next.js-like developer
+experience. It has two equal promises: the human UI is WebSocket-first from the first render, and
+the HTTP MCP API is generated from the same page declarations. Each page is one supervised
+server-side actor. You write the UI once with `<.dialup_action>` and `<.dialup_region>`; Dialup
+derives `tools/list`, `tools/call`, and `read_scene` from those declarations. No duplicate REST
+layer. No hand-written OpenAPI for agent tools.
+
+```
+Human browser  ──WebSocket──►  UserSessionProcess  ◄──HTTP JSON-RPC──  AI agent
+                                      │
+                               handle_event/3
+                                      │
+                          declare_action / dialup_action
+```
 
 ### Features
 
+- **WebSocket-first human UI** — live DOM updates over `/ws` with idiomorph
+- **Auto-generated HTTP MCP API** — actions and regions become agent tools automatically
+- **One event path** — browser events and agent `tools/call` requests share `handle_event/3`
+- **HTTP MCP request-response** — `initialize`, `tools/list`, `tools/call` at `POST /agent/:token`
+- **Agent discovery** — `/.well-known/dialup-agent`, embedded page context, `/llms.txt`
+- **Scoped session tokens** — least-privilege grants with expiry and projection control
 - **File-based routing** — file placement maps directly to URLs
-- **WebSocket-first** — real-time communication built in
-- **Server-side state** — no client-side state management needed
-- **Simple architecture** — lighter than Phoenix/LiveView
-- **Colocated CSS** — `.css` files next to `.ex` files, auto-scoped at compile time
-- **Static file serving** — `priv/static/` served automatically
-- **WebSocket origin verification** — cross-origin connection protection built in
+- **Server-side state** — one tab = one `UserSessionProcess`
+- **Colocated CSS** — `.css` next to `.ex`, auto-scoped at compile time
 
 ## Quick Start
 
@@ -42,86 +57,65 @@ mix run --no-halt
 
 Then visit http://localhost:4000
 
-### Generated project structure
-
-```
-my_app/
-├── mix.exs
-├── lib/
-│   ├── my_app.ex          # Application entry point
-│   ├── root.html.heex     # HTML shell — customize <head>, hooks, analytics
-│   └── app/
-│       ├── layout.ex / layout.css   # Root layout
-│       ├── page.ex   / page.css     # Home page at /
-│       └── error.ex  / error.css    # Error page (404, 500)
-└── priv/static/           # Static assets (images, fonts, favicon)
-```
-
-### Minimal app
+### Agent-ready page in 30 lines
 
 ```elixir
-# lib/my_app.ex
-defmodule MyApp do
-  use Application
-  use Dialup, app_dir: __DIR__ <> "/app"
-
-  def start(_type, _args) do
-    children = [
-      {Dialup, app: __MODULE__, port: 4000}
-    ]
-    Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__.Supervisor)
-  end
-end
-```
-
-```elixir
-# lib/app/page.ex
 defmodule Dialup.App.Page do
   use Dialup.Page
 
-  def mount(_params, assigns) do
-    {:ok, assigns |> set_default(%{count: 0})}
-  end
+  declare_action name: :increment, desc: "Increment counter", params: %{}
 
-  def handle_event("increment", _value, assigns) do
-    {:update, assigns |> overwrite(%{count: assigns.count + 1})}
+  def mount(_params, assigns), do: {:ok, Map.put(assigns, :count, 0)}
+  def agent_state(assigns), do: %{count: assigns.count}
+
+  def handle_event(:increment, _, assigns) do
+    {:update, Map.update!(assigns, :count, &(&1 + 1))}
   end
 
   def render(assigns) do
     ~H"""
-    <h1>Hello Dialup</h1>
     <p>Count: {@count}</p>
-    <button ws-event="increment">+</button>
+    <.dialup_action name={:increment}>+1</.dialup_action>
     """
   end
 end
+```
+
+The same `<.dialup_action>` is a WebSocket-backed browser button and a generated MCP tool. Use the
+page from the browser, or grant a session token and call the API:
+
+```bash
+# After obtaining a token (see guides/mcp-api.md)
+curl -X POST http://localhost:4000/agent/TOKEN \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_scene","arguments":{}}}'
 ```
 
 ## Documentation
 
 Run `mix docs --open` to browse the full documentation locally.
 
-Guide source files live in `guides/`:
+- [Events](./guides/events.md) — **WebSocket-first UI events and updates**
+- [HTTP MCP API](./guides/mcp-api.md) — **auto-generated tools, discovery, versioning**
+- [Building agent-native apps](./guides/agent-native-app-development.md) — implementation workflow
+- [Session tokens](./guides/agent-handoff.md) — reaching a live browser session
+- [Getting Started](./guides/getting-started.md) — installation and basics
+- [Fullstack Example](./guides/fullstack-example.md) — Ecto and PubSub
 
-- [Getting Started](./guides/getting-started.md) — installation and basic usage
-- [Routing](./guides/routing.md) — routing in depth
-- [State Management](./guides/state-management.md) — managing server-side state
-- [Lifecycle](./guides/lifecycle.md) — page lifecycle hooks
-- [Events](./guides/events.md) — handling events
-- [Helpers](./guides/helpers.md) — helper functions
-- [Deployment](./guides/deployment.md) — deploying to production
-- [Fullstack Example](./guides/fullstack-example.md) — a practical app using Ecto and PubSub
+See `guides/` for routing, state, lifecycle, events, deployment, and more.
 
 ## Architecture
 
 ```
-Browser          Elixir Server
-   |                    |
-dialup.js ←──WS──→ UserSessionProcess (1 tab = 1 process)
-   |                    |
-idiomorph            render/1
-                        |
-                     assigns (state)
+Browser (human)     AI agent (MCP client)
+     |                      |
+dialup.js ──WS──► UserSessionProcess ◄──POST /agent/:token──
+     |                      |
+ idiomorph              render/1 + handle_event/3
+                             |
+                    declare_action / dialup_region
+                             │
+                      tools/list (HTTP)
 ```
 
 ## License

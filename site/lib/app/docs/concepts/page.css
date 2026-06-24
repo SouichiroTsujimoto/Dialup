@@ -1,0 +1,30 @@
+.compare-table {
+    width: 100%; 
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+}
+
+.compare-table th {
+    color: var(--main-text);
+    padding: 0.6rem 1rem;
+    text-align: left;
+    font-weight: 700;
+    border-bottom: 2px solid var(--black);
+}
+
+.compare-table td {
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid #ddd;
+    color: var(--ink);
+    vertical-align: top;
+}
+
+.compare-table tr:last-child td {
+    border-bottom: none;
+}
+
+.compare-table .highlight-col {
+    background: var(--accent);
+    font-weight: 700;
+}

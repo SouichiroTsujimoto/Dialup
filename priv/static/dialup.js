@@ -8,16 +8,14 @@ const Dialup = (() => {
     let hooks = {};
     const debounceTimers = new WeakMap();
 
-    // タブごとに一意なIDをインメモリで保持する
-    // sessionStorage はタブ複製時にコピーされるブラウザがあるため使用しない
-    // インメモリであれば複製タブは必ず別のIDを持ち、ネットワーク再接続時は同じIDを再利用できる
-    // Math.random() は予測可能なため crypto.randomUUID() を使用する
     const tabId = crypto.randomUUID();
 
     function send(event, value) {
         if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ event, value }));
+            return true;
         }
+        return false;
     }
 
     function callHook(el, lifecycle) {
@@ -29,7 +27,6 @@ const Dialup = (() => {
         }
     }
 
-    // idiomorph による差分適用
     function applyHtml(html) {
         const root = document.getElementById("dialup-root");
         if (root) {
@@ -54,14 +51,79 @@ const Dialup = (() => {
         const isNavigation = path !== currentPath;
 
         applyHtml(html);
-        // morph 後に接続状態を再適用（idiomorph が data-ws-state をリセットするため）
         setConnectionState(socket?.readyState === WebSocket.OPEN);
         if (isNavigation) window.scrollTo(0, 0);
         if (pushEvent) {
-            // push_event ハンドラは関数のみ（lifecycle hook オブジェクトは対象外）
             const handler = hooks[pushEvent];
             if (typeof handler === "function") handler(payload ?? {});
         }
+    }
+
+    function setUiLock(locked, reason) {
+        const id = "dialup-ui-lock";
+        let overlay = document.getElementById(id);
+
+        if (!locked) {
+            if (overlay) overlay.remove();
+            document.body?.removeAttribute("data-dialup-ui-locked");
+            return;
+        }
+
+        if (!overlay) {
+            overlay = document.createElement("div");
+            overlay.id = id;
+            overlay.setAttribute("role", "alertdialog");
+            overlay.setAttribute("aria-live", "assertive");
+            overlay.style.cssText = [
+                "position:fixed", "inset:0", "z-index:2147483647",
+                "display:flex", "flex-direction:column", "align-items:center",
+                "justify-content:center", "gap:14px", "text-align:center",
+                "padding:24px", "background:rgba(15,23,42,0.55)",
+                "backdrop-filter:blur(2px)", "-webkit-backdrop-filter:blur(2px)",
+                "color:#fff", "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+                "cursor:not-allowed", "user-select:none"
+            ].join(";");
+            // Swallow all interaction so the human cannot operate the page.
+            ["click", "pointerdown", "mousedown", "keydown", "wheel", "touchstart", "submit"]
+                .forEach((type) =>
+                    overlay.addEventListener(type, (e) => { e.preventDefault(); e.stopPropagation(); }, true)
+                );
+
+            const badge = document.createElement("div");
+            badge.style.cssText = "font-size:13px;font-weight:700;letter-spacing:0.08em;opacity:0.85";
+            badge.textContent = "AI AGENT IN CONTROL";
+
+            const title = document.createElement("div");
+            title.style.cssText = "font-size:20px;font-weight:700";
+            title.textContent = "AI が操作中です";
+
+            const msg = document.createElement("div");
+            msg.id = id + "-reason";
+            msg.style.cssText = "font-size:14px;max-width:32rem;line-height:1.6;opacity:0.9";
+
+            const spinner = document.createElement("div");
+            spinner.style.cssText = [
+                "width:28px", "height:28px", "border-radius:50%",
+                "border:3px solid rgba(255,255,255,0.3)", "border-top-color:#fff",
+                "animation:dialup-spin 0.8s linear infinite"
+            ].join(";");
+
+            if (!document.getElementById("dialup-ui-lock-style")) {
+                const style = document.createElement("style");
+                style.id = "dialup-ui-lock-style";
+                style.textContent = "@keyframes dialup-spin{to{transform:rotate(360deg)}}";
+                document.head.appendChild(style);
+            }
+
+            overlay.append(spinner, badge, title, msg);
+            document.body.appendChild(overlay);
+        }
+
+        const reasonEl = document.getElementById(id + "-reason");
+        if (reasonEl) {
+            reasonEl.textContent = reason || "完了するまでしばらくお待ちください。";
+        }
+        document.body?.setAttribute("data-dialup-ui-locked", "true");
     }
 
     function navigate(path) {
@@ -73,9 +135,7 @@ const Dialup = (() => {
         const root = document.getElementById("dialup-root");
         if (!root) return;
 
-        // ws-event, ws-href: クリックイベント
         root.addEventListener("click", (e) => {
-            // ws-href
             const linkEl = e.target.closest("[ws-href]");
             if (linkEl) {
                 e.preventDefault();
@@ -83,17 +143,19 @@ const Dialup = (() => {
                 return;
             }
 
-            // ws-event
             const eventEl = e.target.closest("[ws-event]");
             if (eventEl) {
                 e.preventDefault();
                 const event = eventEl.getAttribute("ws-event");
-                const value = eventEl.getAttribute("ws-value") ?? "";
+                const encodedParams = eventEl.getAttribute("data-dialup-params");
+                let value = eventEl.getAttribute("ws-value") ?? "";
+                if (encodedParams) {
+                    try { value = JSON.parse(encodedParams); } catch (_error) {}
+                }
                 send(event, value);
             }
         });
 
-        // ws-submit: フォーム送信（全フィールドをオブジェクトとして送信）
         root.addEventListener("submit", (e) => {
             const formEl = e.target.closest("[ws-submit]");
             if (formEl) {
@@ -104,7 +166,6 @@ const Dialup = (() => {
             }
         });
 
-        // ws-change: 入力のたびにイベント送信（ws-debounce で遅延可能）
         root.addEventListener("input", (e) => {
             const inputEl = e.target.closest("[ws-change]");
             if (inputEl) {
@@ -125,7 +186,6 @@ const Dialup = (() => {
         });
     }
 
-    // redo/undo
     function setupPopstate() {
         window.addEventListener("popstate", (e) => {
             const path = e.state?.path ?? window.location.pathname;
@@ -164,12 +224,9 @@ const Dialup = (() => {
             const msg = JSON.parse(e.data);
 
             if (msg.target) {
-                // 指定IDの要素だけを更新
                 const el = document.getElementById(msg.target);
                 if (el) Idiomorph.morph(el, msg.html);
-
             } else if (msg.html !== undefined && msg.path !== undefined) {
-                // history と currentPath を更新してから applyUpdate へ
                 if (msg.path !== currentPath) {
                     if (!isPopstateNavigation) {
                         history.pushState({ path: msg.path }, "", msg.path);
@@ -179,6 +236,7 @@ const Dialup = (() => {
 
                 applyUpdate(msg.html, msg.path, msg.push_event, msg.payload);
                 if (msg.title !== undefined) document.title = msg.title;
+                if (msg.ui_locked !== undefined) setUiLock(msg.ui_locked, msg.lock_reason);
                 currentPath = msg.path;
             }
         };
@@ -188,12 +246,10 @@ const Dialup = (() => {
             scheduleReconnect(opts);
         };
 
-        // onerror の後は必ず onclose が発火するため、ここでは何もしない
         socket.onerror = () => {};
     }
 
     function scheduleReconnect(opts) {
-        // 指数バックオフ: 1s → 2s → 4s → 8s → ... 最大30s
         const delay = Math.min(1000 * (2 ** reconnectAttempts), 30000);
         reconnectAttempts++;
         setConnectionState(false);
@@ -210,5 +266,5 @@ const Dialup = (() => {
         connectSocket(opts);
     }
 
-    return { connect, send };
+    return { connect, send, navigate, tabId };
 })();

@@ -73,17 +73,132 @@ defmodule Dialup.Server do
     end
   end
 
+  get "/.well-known/dialup-agent" do
+    conn = Plug.Conn.fetch_query_params(conn)
+    path = conn.params["path"] || "/"
+    app_module = conn.private[:dialup_app]
+
+    case discovery_for(app_module, path) do
+      {:ok, discovery} ->
+        send_json(conn, 200, discovery)
+
+      {:error, :not_found} ->
+        send_json(conn, 404, %{"error" => "Page is not agent-enabled or does not exist"})
+    end
+  end
+
+  get "/llms.txt" do
+    body = """
+    # Dialup MCP API
+
+    Dialup pages auto-generate an MCP-compatible HTTP JSON-RPC API from UI declarations.
+
+    Discovery:
+    1. Read the HTTP Link header or HTML meta `dialup-agent-discovery`.
+    2. Fetch `/.well-known/dialup-agent?path=<URL-encoded-path>` for page concepts and tool catalog.
+    3. Obtain a session bearer token (POST `/_dialup/agent-handoff?tab_id=...` from the live browser tab, or use a server-issued grant).
+    4. POST JSON-RPC 2.0 to `/agent/{token}` with `Content-Type: application/json`.
+
+    Standard flow:
+    - initialize
+    - tools/list
+    - tools/call read_scene
+    - tools/call <action> with the latest `_version` in arguments
+
+    Notes:
+    - Human UI uses WebSocket (`/ws`). Agent tools use HTTP request-response only.
+    - Actions marked `confirm=human` are not executable via HTTP MCP.
+    - On stale version errors (-32009), call read_scene and retry with the returned version.
+    """
+
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(200, body)
+  end
+
+  post "/_dialup/agent-handoff" do
+    app_module = conn.private[:dialup_app]
+    conn = conn |> Plug.Conn.fetch_cookies() |> Plug.Conn.fetch_query_params()
+    tab_id = conn.params["tab_id"]
+
+    with :ok <- check_origin(conn, app_module),
+         {:ok, session_id} <- fetch_dialup_session(conn),
+         {:ok, session_pid} <- fetch_live_tab_session(tab_id, session_id),
+         {:ok, handoff} <- Dialup.UserSessionProcess.issue_browser_handoff(session_pid) do
+      send_json(conn, 200, handoff)
+    else
+      {:error, :not_ready} ->
+        send_json(conn, 409, %{"error" => "Session is still connecting"})
+
+      {:error, :session_not_found} ->
+        send_json(conn, 409, %{"error" => "Live browser session was not found"})
+
+      {:error, reason} ->
+        send_json(conn, 403, %{"error" => to_string(reason)})
+    end
+  end
+
+  get "/agent/:token/ws" do
+    send_json(conn, 404, %{"error" => "Agent WebSocket transport is not supported. Use HTTP JSON-RPC."})
+  end
+
+  get "/agent/:token" do
+    case Dialup.Agent.describe(token) do
+      {:ok, descriptor} ->
+        send_json(conn, 200, descriptor)
+
+      {:error, :not_found} ->
+        send_json(conn, 404, %{"error" => "Session is no longer available"})
+
+      {:error, :grant_expired} ->
+        send_json(conn, 410, %{"error" => "Grant has expired or was revoked"})
+    end
+  end
+
+  post "/agent/:token" do
+    case Plug.Conn.read_body(conn, length: 1_000_000) do
+      {:ok, body, conn} ->
+        case Jason.decode(body) do
+          {:ok, request} ->
+            if Map.has_key?(request, "id") do
+              send_json(conn, 200, Dialup.Agent.rpc(token, request))
+            else
+              _ = Dialup.Agent.rpc(token, request)
+              send_resp(conn, 202, "")
+            end
+
+          {:error, _reason} ->
+            send_json(conn, 400, %{"error" => "Invalid JSON"})
+        end
+
+      {:more, _partial_body, conn} ->
+        send_json(conn, 413, %{"error" => "Request body is too large"})
+
+      {:error, _reason} ->
+        send_json(conn, 400, %{"error" => "Could not read request body"})
+    end
+  end
+
+  delete "/agent/:token" do
+    with {:ok, pid} <- Dialup.Agent.lookup(token),
+         :ok <- Dialup.UserSessionProcess.revoke_agent(pid, token) do
+      send_json(conn, 200, %{"revoked" => true})
+    else
+      _ -> send_json(conn, 404, %{"error" => "Session is no longer available"})
+    end
+  end
+
   get _ do
     conn = Plug.Conn.fetch_cookies(conn)
     {conn, _session_id} = ensure_session_id(conn)
     path = conn.request_path
     app_module = conn.private[:dialup_app]
 
-    {initial_html, page_title} =
+    {initial_html, page_title, discovery} =
       case app_module.page_for(path) do
         nil ->
           html = render_error_for_http(app_module, 404, path)
-          {html, nil}
+          {html, nil, nil}
 
         page_module ->
           params = app_module.path_params(path)
@@ -97,14 +212,19 @@ defmodule Dialup.Server do
             end
 
           title = page_module.page_title(assigns)
-          {html, title}
+          extra = Dialup.Agent.layout_actions(app_module, path)
+          {html, title, Dialup.Agent.discovery(page_module, assigns, path, extra)}
       end
 
     shell_opts = app_module.__shell_opts__() |> Map.merge(%{inner_content: initial_html})
     shell_opts = if page_title, do: Map.put(shell_opts, :title, page_title), else: shell_opts
-    shell = app_module.__render_shell__(shell_opts)
+
+    shell =
+      app_module.__render_shell__(shell_opts)
+      |> inject_agent_discovery(path, discovery)
 
     conn
+    |> maybe_put_agent_link(path, discovery)
     |> put_resp_content_type("text/html")
     |> send_resp(200, shell)
   end
@@ -115,6 +235,22 @@ defmodule Dialup.Server do
       id -> {:ok, id}
     end
   end
+
+  defp fetch_live_tab_session(tab_id, session_id) when is_binary(tab_id) and tab_id != "" do
+    case Registry.lookup(Dialup.SessionRegistry, tab_id) do
+      [{pid, _}] ->
+        if Dialup.UserSessionProcess.session_id(pid) == session_id do
+          {:ok, pid}
+        else
+          {:error, :session_not_found}
+        end
+
+      [] ->
+        {:error, :session_not_found}
+    end
+  end
+
+  defp fetch_live_tab_session(_tab_id, _session_id), do: {:error, :session_not_found}
 
   defp check_origin(conn, app_module) do
     check_origin =
@@ -191,12 +327,80 @@ defmodule Dialup.Server do
     case conn.cookies["dialup_session"] do
       nil ->
         id = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
-        conn = Plug.Conn.put_resp_cookie(conn, "dialup_session", id, http_only: true, same_site: "Lax")
+
+        conn =
+          Plug.Conn.put_resp_cookie(conn, "dialup_session", id, http_only: true, same_site: "Lax")
+
         {conn, id}
 
       id ->
         {conn, id}
     end
+  end
+
+  defp send_json(conn, status, payload) do
+    conn
+    |> put_resp_header("mcp-protocol-version", "2025-11-25")
+    |> put_resp_content_type("application/json")
+    |> send_resp(status, Jason.encode!(payload))
+  end
+
+  defp discovery_for(app_module, path) do
+    case app_module.page_for(path) do
+      nil ->
+        {:error, :not_found}
+
+      page_module ->
+        params = app_module.path_params(path)
+        {:ok, assigns} = page_module.mount(params, %{params: params, current_path: path})
+        assigns = Map.put(assigns, :current_path, path)
+        extra = Dialup.Agent.layout_actions(app_module, path)
+        {:ok, Dialup.Agent.discovery(page_module, assigns, path, extra)}
+    end
+  end
+
+  defp inject_agent_discovery(shell, _path, nil), do: shell
+
+  defp inject_agent_discovery(shell, path, discovery) do
+    href = "/.well-known/dialup-agent?path=" <> URI.encode_www_form(path)
+
+    tags =
+      [
+        ~s(<link rel="alternate" type="application/vnd.dialup.agent+json" href="#{href}">),
+        ~s(<link rel="service-desc" type="application/vnd.dialup.agent+json" href="#{href}">),
+        ~s(<link rel="help" type="text/plain" href="/llms.txt">),
+        ~s(<meta name="dialup-agent-discovery" content="#{href}">),
+        ~s(<meta name="ai-agent-instructions" content="Read #{href} for MCP tool catalog. Use POST /agent/{token} for JSON-RPC tools/list and tools/call.">),
+        ~s(<script id="dialup-agent-context" type="application/json">),
+        safe_json(discovery),
+        "</script>"
+      ]
+      |> IO.iodata_to_binary()
+
+    case String.split(shell, "</head>", parts: 2) do
+      [head, tail] -> head <> tags <> "</head>" <> tail
+      [_shell] -> tags <> shell
+    end
+  end
+
+  defp maybe_put_agent_link(conn, _path, nil), do: conn
+
+  defp maybe_put_agent_link(conn, path, _discovery) do
+    href = "/.well-known/dialup-agent?path=" <> URI.encode_www_form(path)
+
+    Plug.Conn.put_resp_header(
+      conn,
+      "link",
+      ~s(<#{href}>; rel="alternate service-desc"; type="application/vnd.dialup.agent+json", </llms.txt>; rel="help"; type="text/plain")
+    )
+  end
+
+  defp safe_json(value) do
+    value
+    |> Jason.encode!()
+    |> String.replace("<", "\\u003c")
+    |> String.replace(">", "\\u003e")
+    |> String.replace("&", "\\u0026")
   end
 
   match _ do

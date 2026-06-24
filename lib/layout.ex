@@ -49,6 +49,14 @@ defmodule Dialup.Layout do
 
   Layout `mount/1` calls are chained from outermost to innermost. Each layout receives
   the session returned by its parent and may enrich it further.
+
+  ## Navigation actions
+
+  A layout may declare navigation links with `<.dialup_action navigate="/path">`, exactly like a
+  page. These render the shared chrome links for humans and are merged into the MCP tool catalog of
+  every page wrapped by the layout, so an attached agent gets the same site-wide navigation a human
+  sees in the nav bar. Layouts support navigation actions only; event-handling actions
+  (`<.dialup_action>` with `desc`/`params`) belong on a page that implements `handle_event/3`.
   """
 
   @callback render(assigns :: map()) :: Phoenix.LiveView.Rendered.t()
@@ -64,7 +72,11 @@ defmodule Dialup.Layout do
 
       import Phoenix.Component
       import Phoenix.HTML, only: [raw: 1]
-      import Dialup.Page, only: [overwrite: 2, set_default: 2]
+
+      import Dialup.Page,
+        only: [overwrite: 2, set_default: 2, declare_action: 1, dialup_action: 1]
+
+      Module.register_attribute(__MODULE__, :dialup_actions, accumulate: true)
 
       # デフォルト実装：何もしない（mountを定義しないlayoutはsessionに何も追加しない）
       def mount(session), do: {:ok, session}
@@ -143,9 +155,13 @@ defmodule Dialup.Layout do
         end
       end
 
+    actions = Dialup.Page.actions_from_env(env)
+    Dialup.Page.validate_navigation_actions!(env, actions)
+
     quote do
       unquote(render_quote)
       unquote(css_quote)
+      def __dialup_actions__, do: unquote(Macro.escape(actions))
     end
   end
 end
