@@ -59,6 +59,73 @@ const Dialup = (() => {
         }
     }
 
+    function setUiLock(locked, reason) {
+        const id = "dialup-ui-lock";
+        let overlay = document.getElementById(id);
+
+        if (!locked) {
+            if (overlay) overlay.remove();
+            document.body?.removeAttribute("data-dialup-ui-locked");
+            return;
+        }
+
+        if (!overlay) {
+            overlay = document.createElement("div");
+            overlay.id = id;
+            overlay.setAttribute("role", "alertdialog");
+            overlay.setAttribute("aria-live", "assertive");
+            overlay.style.cssText = [
+                "position:fixed", "inset:0", "z-index:2147483647",
+                "display:flex", "flex-direction:column", "align-items:center",
+                "justify-content:center", "gap:14px", "text-align:center",
+                "padding:24px", "background:rgba(15,23,42,0.55)",
+                "backdrop-filter:blur(2px)", "-webkit-backdrop-filter:blur(2px)",
+                "color:#fff", "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+                "cursor:not-allowed", "user-select:none"
+            ].join(";");
+            // Swallow all interaction so the human cannot operate the page.
+            ["click", "pointerdown", "mousedown", "keydown", "wheel", "touchstart", "submit"]
+                .forEach((type) =>
+                    overlay.addEventListener(type, (e) => { e.preventDefault(); e.stopPropagation(); }, true)
+                );
+
+            const badge = document.createElement("div");
+            badge.style.cssText = "font-size:13px;font-weight:700;letter-spacing:0.08em;opacity:0.85";
+            badge.textContent = "AI AGENT IN CONTROL";
+
+            const title = document.createElement("div");
+            title.style.cssText = "font-size:20px;font-weight:700";
+            title.textContent = "AI が操作中です";
+
+            const msg = document.createElement("div");
+            msg.id = id + "-reason";
+            msg.style.cssText = "font-size:14px;max-width:32rem;line-height:1.6;opacity:0.9";
+
+            const spinner = document.createElement("div");
+            spinner.style.cssText = [
+                "width:28px", "height:28px", "border-radius:50%",
+                "border:3px solid rgba(255,255,255,0.3)", "border-top-color:#fff",
+                "animation:dialup-spin 0.8s linear infinite"
+            ].join(";");
+
+            if (!document.getElementById("dialup-ui-lock-style")) {
+                const style = document.createElement("style");
+                style.id = "dialup-ui-lock-style";
+                style.textContent = "@keyframes dialup-spin{to{transform:rotate(360deg)}}";
+                document.head.appendChild(style);
+            }
+
+            overlay.append(spinner, badge, title, msg);
+            document.body.appendChild(overlay);
+        }
+
+        const reasonEl = document.getElementById(id + "-reason");
+        if (reasonEl) {
+            reasonEl.textContent = reason || "完了するまでしばらくお待ちください。";
+        }
+        document.body?.setAttribute("data-dialup-ui-locked", "true");
+    }
+
     function navigate(path) {
         if (path === currentPath) return;
         send("__navigate", path);
@@ -169,6 +236,7 @@ const Dialup = (() => {
 
                 applyUpdate(msg.html, msg.path, msg.push_event, msg.payload);
                 if (msg.title !== undefined) document.title = msg.title;
+                if (msg.ui_locked !== undefined) setUiLock(msg.ui_locked, msg.lock_reason);
                 currentPath = msg.path;
             }
         };

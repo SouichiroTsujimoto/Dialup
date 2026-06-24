@@ -13,6 +13,8 @@ For agent-enabled pages:
 
 - declare state-changing operations with `<.dialup_action>` / `declare_action/1`;
 - implement them once in `handle_event/3`;
+- expose navigation with `<.dialup_action navigate="/path">` (on a page or a layout) so the agent
+  reaches exactly the links the UI declares — raw `ws-href`/`ws-event` are never auto-exposed;
 - add `__available__/2` predicates for live server-side availability;
 - use `<.dialup_region>` for stable domain areas and structured data;
 - expose an allowlisted projection through `agent_state/1`;

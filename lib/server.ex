@@ -212,7 +212,8 @@ defmodule Dialup.Server do
             end
 
           title = page_module.page_title(assigns)
-          {html, title, Dialup.Agent.discovery(page_module, assigns, path)}
+          extra = Dialup.Agent.layout_actions(app_module, path)
+          {html, title, Dialup.Agent.discovery(page_module, assigns, path, extra)}
       end
 
     shell_opts = app_module.__shell_opts__() |> Map.merge(%{inner_content: initial_html})
@@ -353,7 +354,8 @@ defmodule Dialup.Server do
         params = app_module.path_params(path)
         {:ok, assigns} = page_module.mount(params, %{params: params, current_path: path})
         assigns = Map.put(assigns, :current_path, path)
-        {:ok, Dialup.Agent.discovery(page_module, assigns, path)}
+        extra = Dialup.Agent.layout_actions(app_module, path)
+        {:ok, Dialup.Agent.discovery(page_module, assigns, path, extra)}
     end
   end
 

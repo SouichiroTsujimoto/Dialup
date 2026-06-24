@@ -63,7 +63,9 @@ defmodule Dialup.UserSessionProcess do
       },
       agent_proxies: %{agent_token => agent_proxy},
       version: 0,
-      audit_log: []
+      audit_log: [],
+      ui_locked: false,
+      lock_reason: nil
     }
 
     state =
@@ -109,7 +111,8 @@ defmodule Dialup.UserSessionProcess do
               state.path,
               state.version,
               grant,
-              token
+              token,
+              layout_actions(state)
             )
           else
             nil
@@ -135,8 +138,16 @@ defmodule Dialup.UserSessionProcess do
       with {:ok, grant} <- fetch_grant(state, token) do
         tools =
           case current_page(state) do
-            nil -> []
-            page_module -> Dialup.Agent.tools(page_module, merge_for_render(state), grant)
+            nil ->
+              []
+
+            page_module ->
+              Dialup.Agent.tools(
+                page_module,
+                merge_for_render(state),
+                grant,
+                layout_actions(state)
+              )
           end
 
         {:ok, tools}
@@ -161,6 +172,41 @@ defmodule Dialup.UserSessionProcess do
         if Dialup.Agent.Grant.allows?(grant, "read_audit_log") do
           entries = state.audit_log |> Enum.reverse() |> Enum.map(&json_safe_audit/1)
           {:reply, {:ok, %{"entries" => entries}}, state}
+        else
+          {:reply, {:error, :forbidden}, state}
+        end
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:agent_call, token, "lock_ui", arguments}, _from, state) do
+    case fetch_grant(state, token) do
+      {:ok, grant} ->
+        if Dialup.Agent.Grant.allows?(grant, "lock_ui") do
+          reason = arguments["reason"] || arguments[:reason]
+          locked = %{state | ui_locked: true, lock_reason: reason}
+          update_page(locked)
+          locked = audit(locked, token, "lock_ui", :ok, %{"reason" => reason})
+          {:reply, {:ok, lock_result(locked, grant)}, locked}
+        else
+          {:reply, {:error, :forbidden}, state}
+        end
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:agent_call, token, "unlock_ui", _arguments}, _from, state) do
+    case fetch_grant(state, token) do
+      {:ok, grant} ->
+        if Dialup.Agent.Grant.allows?(grant, "lock_ui") do
+          unlocked = %{state | ui_locked: false, lock_reason: nil}
+          update_page(unlocked)
+          unlocked = audit(unlocked, token, "unlock_ui", :ok)
+          {:reply, {:ok, lock_result(unlocked, grant)}, unlocked}
         else
           {:reply, {:error, :forbidden}, state}
         end
@@ -281,6 +327,12 @@ defmodule Dialup.UserSessionProcess do
   end
 
   @impl GenServer
+  def handle_cast({:event, _event, _value}, %{ui_locked: true} = state) do
+    # UI is locked by an agent; ignore human interactions and re-assert the
+    # current view so any optimistic client state is corrected.
+    {:noreply, update_page(state)}
+  end
+
   def handle_cast({:event, event, value}, state) do
     case state.app_module.page_for(state.path) do
       nil ->
@@ -621,7 +673,7 @@ defmodule Dialup.UserSessionProcess do
     |> Map.merge(state.assigns)
     |> Map.put(:params, state.params)
     |> Map.put(:current_path, state.path)
-    |> Map.put(:dialup_agent, %{version: state.version})
+    |> Map.put(:dialup_agent, %{version: state.version, ui_locked: state.ui_locked})
   end
 
   # handle_event/handle_info の返り値を session と assigns に分割する
@@ -676,10 +728,24 @@ defmodule Dialup.UserSessionProcess do
       html = render(state)
       payload = %{html: html, path: state.path}
       payload = put_title(payload, state)
+      payload = put_ui_lock(payload, state)
       send(state.socket_pid, {:send_html, Jason.encode!(payload)})
     end
 
     state
+  end
+
+  defp put_ui_lock(payload, state) do
+    payload
+    |> Map.put(:ui_locked, state.ui_locked)
+    |> Map.put(:lock_reason, state.lock_reason)
+  end
+
+  defp lock_result(state, grant) do
+    state
+    |> current_scene(grant)
+    |> Map.put("uiLocked", state.ui_locked)
+    |> Map.put("lockReason", state.lock_reason)
   end
 
   defp apply_event(page_module, event, value, state) do
@@ -743,26 +809,32 @@ defmodule Dialup.UserSessionProcess do
   end
 
   defp current_scene(state, grant) do
-    case current_page(state) do
-      nil ->
-        %{
-          "path" => state.path,
-          "version" => state.version,
-          "state" => %{},
-          "regions" => [],
-          "actions" => []
-        }
+    scene =
+      case current_page(state) do
+        nil ->
+          %{
+            "path" => state.path,
+            "version" => state.version,
+            "state" => %{},
+            "regions" => [],
+            "actions" => []
+          }
 
-      page_module ->
-        Dialup.Agent.scene(
-          page_module,
-          merge_for_render(state),
-          state.path,
-          state.version,
-          grant
-        )
-    end
+        page_module ->
+          Dialup.Agent.scene(
+            page_module,
+            merge_for_render(state),
+            state.path,
+            state.version,
+            grant,
+            layout_actions(state)
+          )
+      end
+
+    Map.put(scene, "uiLocked", state.ui_locked)
   end
+
+  defp layout_actions(state), do: Dialup.Agent.layout_actions(state.app_module, state.path)
 
   defp resolve_event(page_module, event) do
     case Dialup.Agent.action(page_module, event) do
@@ -783,6 +855,7 @@ defmodule Dialup.UserSessionProcess do
       }
 
       payload = put_title(payload, state)
+      payload = put_ui_lock(payload, state)
       send(state.socket_pid, {:send_html, Jason.encode!(payload)})
     end
   end
@@ -793,8 +866,24 @@ defmodule Dialup.UserSessionProcess do
     with {:ok, grant} <- fetch_grant(state, token),
          true <- Dialup.Agent.Grant.allows?(grant, name) || {:error, :forbidden},
          page_module when not is_nil(page_module) <- current_page(state),
-         action when not is_nil(action) <- Dialup.Agent.action(page_module, name),
-         :ok <- check_version(grant, arguments, state.version),
+         action when not is_nil(action) <-
+           Dialup.Agent.action(page_module, name, layout_actions(state)) do
+      case Map.get(action, :navigate) do
+        nil ->
+          invoke_mutating_action(state, token, grant, page_module, action, name, arguments)
+
+        path ->
+          invoke_navigate_action(state, token, grant, name, path)
+      end
+    else
+      nil -> {{:error, :unknown_action}, state}
+      false -> {{:error, :forbidden}, state}
+      {:error, reason} -> {{:error, reason}, audit(state, token, name, :error)}
+    end
+  end
+
+  defp invoke_mutating_action(state, token, grant, page_module, action, name, arguments) do
+    with :ok <- check_version(grant, arguments, state.version),
          clean_arguments = Map.drop(arguments, ["_version", :_version]),
          {:ok, clean_arguments} <- validate_agent_arguments(action, clean_arguments),
          true <-
@@ -816,9 +905,17 @@ defmodule Dialup.UserSessionProcess do
         end
       end
     else
-      nil -> {{:error, :unknown_action}, state}
-      false -> {{:error, :forbidden}, state}
       {:error, reason} -> {{:error, reason}, audit(state, token, name, :error)}
+    end
+  end
+
+  defp invoke_navigate_action(state, token, grant, name, path) do
+    if is_nil(state.app_module.page_for(path)) do
+      {{:error, :unknown_target}, audit(state, token, name, :error)}
+    else
+      navigated = do_navigate(path, bump_version(state))
+      navigated = audit(navigated, token, name, :ok, %{"path" => path})
+      {{:ok, current_scene(navigated, grant)}, navigated}
     end
   end
 

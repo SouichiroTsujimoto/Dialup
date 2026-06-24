@@ -12,7 +12,6 @@ defmodule Dialup.Agent.Grant do
       token: token,
       capabilities: normalize_capabilities(Map.get(opts, :capabilities, :all)),
       projections: Map.get(opts, :projections, [:state, :regions, :actions]),
-      approval: Map.get(opts, :approval, :per_action),
       require_version: Map.get(opts, :require_version, true),
       issued_at: now,
       expires_at: if(ttl == :infinity, do: :infinity, else: now + ttl),
@@ -45,7 +44,6 @@ defmodule Dialup.Agent.Grant do
           else: Enum.map(grant.capabilities, &to_string/1)
         ),
       "projections" => Enum.map(grant.projections, &to_string/1),
-      "approval" => to_string(grant.approval),
       "requireVersion" => grant.require_version,
       "expiresInMs" => remaining_ms(grant)
     }

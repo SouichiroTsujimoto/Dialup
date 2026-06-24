@@ -53,6 +53,11 @@ defmodule Dialup.Page do
   available to an attached agent. Use `<.dialup_region>` for stable domain areas that need
   a semantic name, structured data, or action relationships.
 
+  `<.dialup_action>` is the single boundary for what an agent can do: raw `ws-event`,
+  `ws-submit`, `ws-change`, and `ws-href` elements are never auto-exposed as tools. To make a
+  navigation link agent-operable, declare it with `<.dialup_action navigate="/path">`; the same
+  declaration renders the human link and generates the navigation tool.
+
   Ordinary visible DOM elements remain available for human spatial references, but their
   generated selectors are less stable than region IDs. See
   `guides/agent-native-app-development.md` for the complete implementation workflow.
@@ -151,7 +156,50 @@ defmodule Dialup.Page do
       <.dialup_action name={:add_item} available={@status == :draft} sku="SKU-1" qty="1">
         Add item
       </.dialup_action>
+
+  Pass `navigate` to render a navigation link instead of an event button. The same
+  declaration becomes a navigation tool for an attached agent, so the agent can move
+  between pages exactly where a human can click:
+
+      <.dialup_action navigate="/docs/concepts">Concepts</.dialup_action>
+
+  Navigation actions take no parameters; the destination is fixed at the declaration
+  site. When `name` is omitted it is derived from the path (e.g. `/docs/concepts`
+  becomes `:navigate_docs_concepts`).
   """
+  def dialup_action(%{navigate: navigate} = assigns) when is_binary(navigate) do
+    name =
+      case Map.get(assigns, :name) do
+        nil -> navigate_action_name(navigate)
+        explicit -> explicit
+      end
+      |> to_string()
+
+    assigns =
+      assigns
+      |> Phoenix.Component.assign(:action_name, name)
+      |> Phoenix.Component.assign(:navigate_to, navigate)
+      |> Phoenix.Component.assign(:available, Map.get(assigns, :available, true))
+      |> Phoenix.Component.assign(:action_desc, Map.get(assigns, :desc))
+      |> Phoenix.Component.assign_new(:class, fn -> nil end)
+      |> Phoenix.Component.assign_new(:id, fn -> nil end)
+
+    ~H"""
+    <a
+      id={@id}
+      class={@class}
+      href={@navigate_to}
+      ws-href={@navigate_to}
+      data-dialup-id={@action_name}
+      data-dialup-kind="navigate"
+      data-dialup-desc={@action_desc}
+      aria-disabled={to_string(!@available)}
+    >
+      {render_slot(@inner_block)}
+    </a>
+    """
+  end
+
   def dialup_action(assigns) do
     name = assigns |> Map.fetch!(:name) |> to_string()
     available = Map.get(assigns, :available, true)
@@ -176,7 +224,8 @@ defmodule Dialup.Page do
         :success,
         :class,
         :id,
-        :type
+        :type,
+        :navigate
       ])
       |> Jason.encode!()
 
@@ -211,7 +260,22 @@ defmodule Dialup.Page do
   end
 
   @doc """
-  Wraps content in a semantic region that can be focused by an attached agent.
+  Derives the canonical navigation action name for an app path.
+
+  `/docs/concepts` becomes `:navigate_docs_concepts` and `/` becomes `:navigate_root`.
+  """
+  def navigate_action_name(path) when is_binary(path) do
+    slug =
+      path
+      |> String.trim("/")
+      |> String.replace(~r/[^a-zA-Z0-9]+/, "_")
+      |> String.trim("_")
+
+    String.to_atom("navigate_" <> if(slug == "", do: "root", else: slug))
+  end
+
+  @doc """
+  Wraps content in a semantic region that agents can read through `read_scene`.
   """
   def dialup_region(assigns) do
     assigns =
@@ -431,8 +495,7 @@ defmodule Dialup.Page do
       end
 
     use_layout = Module.get_attribute(env.module, :layout, true)
-    declared_actions = env.module |> Module.get_attribute(:dialup_actions, []) |> Enum.reverse()
-    actions = merge_actions!(env, declared_actions, extract_inline_actions!(env))
+    actions = actions_from_env(env)
     declared_regions = env.module |> Module.get_attribute(:dialup_regions, []) |> Enum.reverse()
     regions = merge_regions!(env, declared_regions, extract_inline_regions!(env))
     validate_semantic_declarations!(env, actions, regions)
@@ -450,6 +513,35 @@ defmodule Dialup.Page do
       def __dialup_actions__, do: unquote(Macro.escape(actions))
       def __dialup_regions__, do: unquote(Macro.escape(regions))
     end
+  end
+
+  @doc false
+  def actions_from_env(env) do
+    declared = env.module |> Module.get_attribute(:dialup_actions, []) |> Enum.reverse()
+    merge_actions!(env, declared, extract_inline_actions!(env))
+  end
+
+  @doc false
+  def validate_navigation_actions!(env, actions) do
+    validate_unique!(env, actions, "action")
+
+    Enum.each(actions, fn action ->
+      for key <- [:name, :desc, :params], not Map.has_key?(action, key) do
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description: "Dialup action is missing required #{inspect(key)} metadata"
+      end
+
+      unless Map.has_key?(action, :navigate) do
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "layouts only support navigation actions; declare #{inspect(action.name)} with " <>
+              "<.dialup_action navigate=\"/path\"> (event-handling actions belong on a page)"
+      end
+    end)
   end
 
   defp validate_semantic_declarations!(env, actions, regions) do
@@ -494,7 +586,7 @@ defmodule Dialup.Page do
       env
       |> semantic_source()
       |> component_openings("<.dialup_action")
-      |> Enum.map(&required_component_name!(&1, env))
+      |> Enum.map(&component_action_name!(&1, env))
       |> Enum.map(&to_string/1)
       |> MapSet.new()
 
@@ -527,11 +619,15 @@ defmodule Dialup.Page do
     |> semantic_source()
     |> component_openings("<.dialup_action")
     |> Enum.flat_map(fn attrs ->
-      name = required_component_name!(attrs, env)
+      navigate = component_attr(attrs, "navigate", env)
+      name = component_action_name!(attrs, env)
       desc = component_attr(attrs, "desc", env)
       params = component_attr(attrs, "params", env)
 
       cond do
+        not is_nil(navigate) ->
+          [navigate_declaration(attrs, env, name, navigate, desc)]
+
         is_nil(desc) and is_nil(params) ->
           []
 
@@ -561,6 +657,20 @@ defmodule Dialup.Page do
           ]
       end
     end)
+  end
+
+  defp navigate_declaration(attrs, env, name, navigate, desc) do
+    %{
+      name: name,
+      navigate: navigate,
+      desc: desc || "Open #{navigate}",
+      params: %{},
+      confirm: component_attr(attrs, "confirm", env),
+      risk: component_attr(attrs, "risk", env),
+      effects: component_attr(attrs, "effects", env)
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
   end
 
   defp extract_inline_regions!(env) do
@@ -685,6 +795,33 @@ defmodule Dialup.Page do
           file: env.file,
           line: env.line,
           description: "Dialup action name must be a compile-time constant"
+
+      name ->
+        name
+    end
+  end
+
+  # Like required_component_name!/2, but derives the name from a navigate target
+  # when no explicit name is given.
+  defp component_action_name!(attrs, env) do
+    case component_attr(attrs, "name", env) do
+      nil ->
+        case component_attr(attrs, "navigate", env) do
+          path when is_binary(path) ->
+            navigate_action_name(path)
+
+          nil ->
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description: "Dialup action must provide a compile-time name or navigate target"
+
+          _other ->
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description: "Dialup action navigate target must be a compile-time string"
+        end
 
       name ->
         name

@@ -11,6 +11,23 @@ defmodule Dialup.Agent do
 
   def endpoint(token), do: "/agent/#{token}"
 
+  @builtin_tool_names ["read_scene", "read_audit_log", "lock_ui", "unlock_ui"]
+  def builtin_tool_names, do: @builtin_tool_names
+
+  @doc """
+  Collects navigation actions declared by the layouts that wrap `path`.
+
+  Navigation actions declared with `<.dialup_action navigate="/path">` on a layout are
+  merged into the effective tool catalog for every page under that layout.
+  """
+  def layout_actions(app_module, path) when is_binary(path) do
+    app_module.layouts_for(path)
+    |> Enum.filter(&function_exported?(&1, :__dialup_actions__, 0))
+    |> Enum.flat_map(& &1.__dialup_actions__())
+  end
+
+  def layout_actions(_app_module, _path), do: []
+
   def describe(token) do
     with {:ok, pid} <- lookup(token) do
       UserSessionProcess.agent_describe(pid, token)
@@ -69,11 +86,10 @@ defmodule Dialup.Agent do
     }
   end
 
-  def tools(page_module, assigns, grant \\ nil) do
+  def tools(page_module, assigns, grant \\ nil, extra_actions \\ []) do
     actions =
-      if function_exported?(page_module, :__dialup_actions__, 0),
-        do: page_module.__dialup_actions__(),
-        else: []
+      (page_actions(page_module) ++ extra_actions)
+      |> Enum.uniq_by(&to_string(Map.fetch!(&1, :name)))
 
     builtins = [
       %{
@@ -85,23 +101,52 @@ defmodule Dialup.Agent do
         "name" => "read_audit_log",
         "description" => "Read the ordered human and agent action log",
         "inputSchema" => %{"type" => "object", "properties" => %{}}
+      },
+      %{
+        "name" => "lock_ui",
+        "description" =>
+          "Lock the human browser UI so the person cannot operate the page while the agent works. " <>
+            "Always call unlock_ui when finished.",
+        "inputSchema" => %{
+          "type" => "object",
+          "properties" => %{
+            "reason" => %{
+              "type" => "string",
+              "description" => "Short message shown to the human while the UI is locked"
+            }
+          }
+        }
+      },
+      %{
+        "name" => "unlock_ui",
+        "description" => "Release a UI lock previously set with lock_ui",
+        "inputSchema" => %{"type" => "object", "properties" => %{}}
       }
     ]
 
     action_tools =
       Enum.map(actions, fn action ->
         name = action |> Map.fetch!(:name) |> to_string()
+        navigate = Map.get(action, :navigate)
+
+        input_schema =
+          if navigate,
+            do: %{"type" => "object", "properties" => %{}},
+            else:
+              input_schema(
+                Map.get(action, :params, %{}),
+                if(grant, do: grant.require_version, else: true)
+              )
+
+        available = if navigate, do: true, else: available?(page_module, action.name, assigns)
 
         %{
           "name" => name,
           "description" => Map.get(action, :desc, name),
-          "inputSchema" =>
-            input_schema(
-              Map.get(action, :params, %{}),
-              if(grant, do: grant.require_version, else: true)
-            ),
+          "inputSchema" => input_schema,
           "_meta" => %{
-            "available" => available?(page_module, action.name, assigns),
+            "available" => available,
+            "navigate" => navigate,
             "confirm" => Map.get(action, :confirm),
             "risk" => Map.get(action, :risk, "unspecified"),
             "effects" => Map.get(action, :effects),
@@ -125,6 +170,7 @@ defmodule Dialup.Agent do
         Enum.filter(builtins, fn tool ->
           case tool["name"] do
             "read_scene" -> grant.projections != []
+            "unlock_ui" -> Dialup.Agent.Grant.allows?(grant, "lock_ui")
             name -> Dialup.Agent.Grant.allows?(grant, name)
           end
         end)
@@ -135,20 +181,21 @@ defmodule Dialup.Agent do
     builtins ++ action_tools
   end
 
-  def scene(page_module, assigns, path, version, grant \\ nil) do
+  def scene(page_module, assigns, path, version, grant \\ nil, extra_actions \\ []) do
     regions =
       if function_exported?(page_module, :__dialup_regions__, 0),
         do: page_module.__dialup_regions__(),
         else: []
 
     actions =
-      tools(page_module, assigns, grant)
-      |> Enum.reject(&(&1["name"] in ["read_scene", "read_audit_log"]))
+      tools(page_module, assigns, grant, extra_actions)
+      |> Enum.reject(&(&1["name"] in builtin_tool_names()))
       |> Enum.map(fn tool ->
         %{
           "name" => tool["name"],
           "description" => tool["description"],
           "available" => tool["_meta"]["available"],
+          "navigate" => tool["_meta"]["navigate"],
           "confirm" => tool["_meta"]["confirm"],
           "risk" => tool["_meta"]["risk"],
           "effects" => tool["_meta"]["effects"],
@@ -180,7 +227,7 @@ defmodule Dialup.Agent do
     |> maybe_put_projection(grant, :actions, "actions", actions)
   end
 
-  def discovery(page_module, assigns, path) do
+  def discovery(page_module, assigns, path, extra_actions \\ []) do
     message =
       if function_exported?(page_module, :agent_message, 1),
         do: page_module.agent_message(assigns),
@@ -191,7 +238,7 @@ defmodule Dialup.Agent do
       "version" => 1,
       "url" => path,
       "message" => json_safe(message),
-      "scene" => scene(page_module, assigns, path, 0),
+      "scene" => scene(page_module, assigns, path, 0, nil, extra_actions),
       "accessModel" => %{
         "pageUrl" =>
           "The ordinary page URL exposes the tool catalog but does not authenticate an agent " <>
@@ -237,9 +284,9 @@ defmodule Dialup.Agent do
     }
   end
 
-  def connected_discovery(page_module, assigns, path, version, grant, token) do
-    discovery(page_module, assigns, path)
-    |> Map.put("scene", scene(page_module, assigns, path, version, grant))
+  def connected_discovery(page_module, assigns, path, version, grant, token, extra_actions \\ []) do
+    discovery(page_module, assigns, path, extra_actions)
+    |> Map.put("scene", scene(page_module, assigns, path, version, grant, extra_actions))
     |> put_in(
       ["connection"],
       %{
@@ -261,20 +308,22 @@ defmodule Dialup.Agent do
       else: true
   end
 
-  def action(page_module, name) do
-    actions =
-      if function_exported?(page_module, :__dialup_actions__, 0),
-        do: page_module.__dialup_actions__(),
-        else: []
-
+  def action(page_module, name, extra_actions \\ []) do
+    actions = page_actions(page_module) ++ extra_actions
     Enum.find(actions, fn action -> to_string(action.name) == to_string(name) end)
   end
 
-  def target?(page_module, assigns, grant, target) do
+  defp page_actions(page_module) do
+    if function_exported?(page_module, :__dialup_actions__, 0),
+      do: page_module.__dialup_actions__(),
+      else: []
+  end
+
+  def target?(page_module, assigns, grant, target, extra_actions \\ []) do
     action_names =
-      tools(page_module, assigns, grant)
+      tools(page_module, assigns, grant, extra_actions)
       |> Enum.map(& &1["name"])
-      |> Enum.reject(&(&1 in ["read_scene", "read_audit_log"]))
+      |> Enum.reject(&(&1 in builtin_tool_names()))
 
     region_names =
       if Dialup.Agent.Grant.projects?(grant, :regions) and
@@ -509,7 +558,17 @@ defmodule Dialup.Agent do
       "expiryRecovery" =>
         "If the session token expires or is revoked, obtain a fresh token from the live session.",
       "humanConfirmation" =>
-        "confirm=human actions return error -32004 over HTTP MCP. Use the human browser UI instead."
+        "confirm=human actions return error -32004 over HTTP MCP. Use the human browser UI instead.",
+      "navigation" =>
+        "Navigation is exposed as ordinary actions whose _meta.navigate is the destination path " <>
+          "(for example navigate_docs_concepts). Call one to open that page, just like a human " <>
+          "clicking the same link. The human browser follows. The tool catalog changes per page, " <>
+          "so call tools/list or read_scene after navigating. There is no free-form navigate tool: " <>
+          "agents reach exactly the pages the UI links to.",
+      "uiLock" =>
+        "When the grant allows it, call lock_ui (optionally with a reason) to stop the human from " <>
+          "operating the page while you work, and always call unlock_ui when finished. Human " <>
+          "interactions are ignored while locked; read_scene reports uiLocked."
     }
   end
 end

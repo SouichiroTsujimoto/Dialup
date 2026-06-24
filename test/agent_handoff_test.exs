@@ -1,77 +1,3 @@
-defmodule Dialup.AgentHandoffTest.Page do
-  use Dialup.Page
-
-  declare_action(
-    name: :increment,
-    desc: "Increment the shared counter",
-    params: %{amount: {:integer, default: 1}}
-  )
-
-  declare_action(
-    name: :reset,
-    desc: "Reset the counter",
-    params: %{},
-    confirm: :human,
-    agent_only: true
-  )
-
-  declare_region(
-    name: :counter,
-    role: "status",
-    desc: "Shared counter value",
-    data: :count,
-    actions: [:increment]
-  )
-
-  def mount(_params, assigns), do: {:ok, Map.put(assigns, :count, 0)}
-
-  def __available__(:increment, assigns), do: assigns.count < 10
-  def __available__(:reset, _assigns), do: true
-
-  def agent_state(assigns), do: %{count: assigns.count}
-
-  def agent_message(_assigns) do
-    %{
-      concept: "A shared counter operated by a human and an agent.",
-      flow: ["Read the scene", "Increment with the current version"]
-    }
-  end
-
-  def handle_event(:increment, params, assigns) do
-    amount = params["amount"] || params[:amount] || 1
-    {:update, Map.update!(assigns, :count, &(&1 + amount))}
-  end
-
-  def handle_event(:reset, _params, assigns), do: {:update, Map.put(assigns, :count, 0)}
-
-  def render(assigns) do
-    ~H"""
-    <.dialup_region name={:counter} role="status" desc="Shared counter value">
-      <span>{@count}</span>
-    </.dialup_region>
-    <.dialup_action name={:increment} amount="1">Increment</.dialup_action>
-    """
-  end
-end
-
-defmodule Dialup.AgentHandoffTest.App do
-  alias Dialup.AgentHandoffTest.Page
-
-  def page_for("/"), do: Page
-  def page_for(_path), do: nil
-  def path_params(_path), do: %{}
-  def layouts_for(_path), do: []
-  def error_page_for(_path), do: nil
-  def dispatch("/", assigns), do: {:ok, Dialup.Router.render_with_layouts(Page, [], assigns)}
-  def dispatch(_path, _assigns), do: {:error, :not_found}
-  def __session_store__, do: :memory
-  def __shell_opts__, do: %{title: "Test", lang: "en"}
-
-  def __render_shell__(assigns) do
-    "<html><head><title>Test</title></head><body>#{assigns.inner_content}</body></html>"
-  end
-end
-
 defmodule Dialup.AgentHandoffTest do
   use ExUnit.Case, async: false
 
@@ -155,6 +81,102 @@ defmodule Dialup.AgentHandoffTest do
     assert reset["error"]["code"] == -32_004
     assert reset["error"]["message"] =~ "not supported via HTTP MCP"
     assert reset["error"]["data"]["confirm"] == "human"
+  end
+
+  test "navigation is a declared action, not a free-form navigate tool", %{token: token} do
+    names = rpc(token, 0, "tools/list", %{})["result"]["tools"] |> Enum.map(& &1["name"])
+
+    refute "navigate" in names
+    assert "navigate_root" in names
+
+    moved =
+      rpc(token, 1, "tools/call", %{"name" => "navigate_root", "arguments" => %{}})
+
+    assert_receive {:send_html, payload}
+    assert Jason.decode!(payload)["path"] == "/"
+    assert moved["result"]["structuredContent"]["path"] == "/"
+  end
+
+  test "a layout navigation action is part of the page tool catalog", %{token: token} do
+    names = rpc(token, 0, "tools/list", %{})["result"]["tools"] |> Enum.map(& &1["name"])
+    assert "navigate_board" in names
+
+    moved =
+      rpc(token, 1, "tools/call", %{"name" => "navigate_board", "arguments" => %{}})
+
+    assert_receive {:send_html, payload}
+    assert Jason.decode!(payload)["path"] == "/board"
+    assert moved["result"]["structuredContent"]["path"] == "/board"
+  end
+
+  test "navigating to a path that no longer exists is rejected", %{token: token} do
+    missing =
+      rpc(token, 1, "tools/call", %{"name" => "navigate_missing", "arguments" => %{}})
+
+    assert missing["error"]["code"] == -32_602
+  end
+
+  test "navigation actions are gated by capability", %{pid: pid} do
+    {:ok, descriptor} =
+      Dialup.Session.grant(pid, capabilities: [:increment], projections: [:state])
+
+    token = descriptor["token"]
+    names = rpc(token, 1, "tools/list", %{})["result"]["tools"] |> Enum.map(& &1["name"])
+    refute "navigate_root" in names
+    refute "navigate_board" in names
+
+    forbidden =
+      rpc(token, 2, "tools/call", %{"name" => "navigate_root", "arguments" => %{}})
+
+    assert forbidden["error"]["code"] == -32_003
+  end
+
+  test "an agent can lock and unlock the human UI", %{pid: pid, token: token} do
+    names = rpc(token, 0, "tools/list", %{})["result"]["tools"] |> Enum.map(& &1["name"])
+    assert "lock_ui" in names
+    assert "unlock_ui" in names
+
+    locked =
+      rpc(token, 1, "tools/call", %{
+        "name" => "lock_ui",
+        "arguments" => %{"reason" => "AI is editing"}
+      })
+
+    assert locked["result"]["structuredContent"]["uiLocked"] == true
+    assert locked["result"]["structuredContent"]["lockReason"] == "AI is editing"
+    assert_receive {:send_html, lock_payload}
+    assert Jason.decode!(lock_payload)["ui_locked"] == true
+
+    # Human interaction is ignored while the UI is locked.
+    UserSessionProcess.event(pid, "increment", %{"amount" => 5})
+    assert_receive {:send_html, _reasserted}
+    scene = rpc(token, 2, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
+    assert scene["result"]["structuredContent"]["state"]["count"] == 0
+    assert scene["result"]["structuredContent"]["uiLocked"] == true
+
+    # Unlocking restores human control.
+    unlocked = rpc(token, 3, "tools/call", %{"name" => "unlock_ui", "arguments" => %{}})
+    assert unlocked["result"]["structuredContent"]["uiLocked"] == false
+    assert_receive {:send_html, unlock_payload}
+    assert Jason.decode!(unlock_payload)["ui_locked"] == false
+
+    UserSessionProcess.event(pid, "increment", %{"amount" => 4})
+    assert_receive {:send_html, _human_update}
+    after_scene = rpc(token, 4, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
+    assert after_scene["result"]["structuredContent"]["state"]["count"] == 4
+  end
+
+  test "lock_ui requires the lock_ui capability", %{pid: pid} do
+    {:ok, descriptor} =
+      Dialup.Session.grant(pid, capabilities: [:increment], projections: [:state])
+
+    token = descriptor["token"]
+    names = rpc(token, 1, "tools/list", %{})["result"]["tools"] |> Enum.map(& &1["name"])
+    refute "lock_ui" in names
+    refute "unlock_ui" in names
+
+    forbidden = rpc(token, 2, "tools/call", %{"name" => "lock_ui", "arguments" => %{}})
+    assert forbidden["error"]["code"] == -32_003
   end
 
   test "component markup carries semantic ids and serialized parameters" do
