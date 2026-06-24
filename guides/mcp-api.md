@@ -156,5 +156,4 @@ repeated references. Use `agent_only: true` when an operation has no human butto
 ## Demos and references
 
 - [Building agent-native applications](./agent-native-app-development.md) — implementation workflow
-- [`examples/handoff_demo`](../examples/handoff_demo/README.md) — runnable HTTP MCP client
 - [Live demo](https://dialup-framework.org/agent_demo) — interactive playground on dialup-framework.org

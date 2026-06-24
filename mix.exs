@@ -77,15 +77,7 @@ defmodule Dialup.MixProject do
         "GitHub" => "https://github.com/SouichiroTsujimoto/Dialup"
       },
       files:
-        ~w(lib priv guides AGENTS.md mix.exs README.md README.ja.md LICENSE) ++
-          ~w(
-            examples/handoff_demo/.gitignore
-            examples/handoff_demo/README.md
-            examples/handoff_demo/agent.py
-            examples/handoff_demo/mix.exs
-            examples/handoff_demo/mix.lock
-            examples/handoff_demo/lib
-          )
+        ~w(lib priv guides AGENTS.md mix.exs README.md README.ja.md LICENSE)
     ]
   end
 end

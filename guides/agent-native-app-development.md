@@ -99,5 +99,4 @@ they return error `-32004` over HTTP MCP and must be performed in the human UI.
 - [ ] `tools/list` matches the declared actions on the page.
 - [ ] Stale-version, grant expiry, and revocation paths are tested.
 
-Use [`examples/handoff_demo`](../examples/handoff_demo/README.md) and
-[dialup-framework.org/agent_demo](https://dialup-framework.org/agent_demo) as references.
+Use [dialup-framework.org/agent_demo](https://dialup-framework.org/agent_demo) as a reference.

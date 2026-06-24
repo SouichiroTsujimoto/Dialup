@@ -5,7 +5,6 @@ When implementing a Dialup application, read these in order:
 1. `guides/agent-native-app-development.md`
 2. `guides/mcp-api.md`
 3. `guides/agent-handoff.md` (session tokens)
-4. `examples/handoff_demo/lib/app/page.ex`
 
 Treat the page's server-side session as the single source of truth. Do not create a
 separate agent API or duplicate business logic. UI declarations become HTTP MCP tools.

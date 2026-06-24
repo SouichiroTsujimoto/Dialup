@@ -71,13 +71,9 @@ See [HTTP MCP API](./mcp-api.md) for the complete method list, versioning rules,
 
 Ask the user to issue a fresh token from their still-open tab if a grant expires mid-task.
 
-## Runnable example
+## Live example
 
-```bash
-cd examples/handoff_demo
-mix run --no-halt
-python3 agent.py http://localhost:4100/agent/TOKEN
-```
+See the [agent handoff demo](https://dialup-framework.org/agent_demo) on dialup-framework.org.
 
 The demo page mints a token via `Dialup.Session.grant/2`. Production apps typically combine
 programmatic grants with the handoff endpoint for user-initiated access.
