@@ -384,7 +384,7 @@ defmodule Dialup.Page do
           instructions: [
             "Read the semantic scene before acting.",
             "Use the returned state version for every mutating action.",
-            "Actions marked confirm=human are not executable via HTTP MCP."
+            "Actions marked confirm=human return an isError tool result over HTTP MCP."
           ]
         }
       end

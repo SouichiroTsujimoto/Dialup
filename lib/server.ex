@@ -97,7 +97,12 @@ defmodule Dialup.Server do
     1. Read the HTTP Link header or HTML meta `dialup-agent-discovery`.
     2. Fetch `/.well-known/dialup-agent?path=<URL-encoded-path>` for page concepts and tool catalog.
     3. Obtain a session bearer token (POST `/_dialup/agent-handoff?tab_id=...` from the live browser tab, or use a server-issued grant).
-    4. POST JSON-RPC 2.0 to `/agent/{token}` with `Content-Type: application/json`.
+    4. POST JSON-RPC 2.0 to the MCP endpoint with `Content-Type: application/json`.
+
+    Endpoints (Streamable HTTP transport):
+    - `POST /mcp` with `Authorization: Bearer <token>` (or `Mcp-Session-Id: <token>`) — canonical endpoint for standard MCP clients.
+    - `POST /agent/{token}` — equivalent endpoint that carries the token in the path.
+    - A GET to either endpoint returns 405 (no server-initiated SSE stream is offered).
 
     Standard flow:
     - initialize
@@ -107,8 +112,8 @@ defmodule Dialup.Server do
 
     Notes:
     - Human UI uses WebSocket (`/ws`). Agent tools use HTTP request-response only.
-    - Actions marked `confirm=human` are not executable via HTTP MCP.
-    - On stale version errors (-32009), call read_scene and retry with the returned version.
+    - Actions marked `confirm=human` return an isError tool result over HTTP MCP.
+    - On a stale `_version`, tools/call returns an isError result whose structuredContent.currentVersion is the latest; call read_scene and retry.
     """
 
     conn
@@ -142,50 +147,57 @@ defmodule Dialup.Server do
     send_json(conn, 404, %{"error" => "Agent WebSocket transport is not supported. Use HTTP JSON-RPC."})
   end
 
+  # Canonical MCP endpoint for standard Streamable HTTP clients. The session token is
+  # carried in the `Authorization: Bearer <token>` (or `Mcp-Session-Id`) header rather
+  # than the URL, so a plain MCP client only needs the endpoint URL plus the token it
+  # obtained out of band (browser handoff or server grant).
+  post "/mcp" do
+    case resolve_mcp_token(conn) do
+      nil -> mcp_unauthorized(conn)
+      token -> mcp_post(conn, token)
+    end
+  end
+
+  get "/mcp" do
+    # We do not offer a server-initiated SSE stream; the spec requires 405 in that case.
+    conn
+    |> Plug.Conn.put_resp_header("allow", "POST, DELETE")
+    |> send_resp(405, "")
+  end
+
+  delete "/mcp" do
+    case resolve_mcp_token(conn) do
+      nil -> mcp_unauthorized(conn)
+      token -> mcp_delete(conn, token)
+    end
+  end
+
   get "/agent/:token" do
-    case Dialup.Agent.describe(token) do
-      {:ok, descriptor} ->
-        send_json(conn, 200, descriptor)
+    if sse_requested?(conn) do
+      # A standard MCP client opening a GET SSE stream gets 405 (no SSE offered here).
+      conn
+      |> Plug.Conn.put_resp_header("allow", "POST, DELETE")
+      |> send_resp(405, "")
+    else
+      case Dialup.Agent.describe(token) do
+        {:ok, descriptor} ->
+          send_json(conn, 200, descriptor)
 
-      {:error, :not_found} ->
-        send_json(conn, 404, %{"error" => "Session is no longer available"})
+        {:error, :not_found} ->
+          send_json(conn, 404, %{"error" => "Session is no longer available"})
 
-      {:error, :grant_expired} ->
-        send_json(conn, 410, %{"error" => "Grant has expired or was revoked"})
+        {:error, :grant_expired} ->
+          send_json(conn, 410, %{"error" => "Grant has expired or was revoked"})
+      end
     end
   end
 
   post "/agent/:token" do
-    case Plug.Conn.read_body(conn, length: 1_000_000) do
-      {:ok, body, conn} ->
-        case Jason.decode(body) do
-          {:ok, request} ->
-            if Map.has_key?(request, "id") do
-              send_json(conn, 200, Dialup.Agent.rpc(token, request))
-            else
-              _ = Dialup.Agent.rpc(token, request)
-              send_resp(conn, 202, "")
-            end
-
-          {:error, _reason} ->
-            send_json(conn, 400, %{"error" => "Invalid JSON"})
-        end
-
-      {:more, _partial_body, conn} ->
-        send_json(conn, 413, %{"error" => "Request body is too large"})
-
-      {:error, _reason} ->
-        send_json(conn, 400, %{"error" => "Could not read request body"})
-    end
+    mcp_post(conn, token)
   end
 
   delete "/agent/:token" do
-    with {:ok, pid} <- Dialup.Agent.lookup(token),
-         :ok <- Dialup.UserSessionProcess.revoke_agent(pid, token) do
-      send_json(conn, 200, %{"revoked" => true})
-    else
-      _ -> send_json(conn, 404, %{"error" => "Session is no longer available"})
-    end
+    mcp_delete(conn, token)
   end
 
   get _ do
@@ -338,9 +350,117 @@ defmodule Dialup.Server do
     end
   end
 
+  defp mcp_post(conn, token) do
+    case validate_protocol_version(conn) do
+      :ok ->
+        case Plug.Conn.read_body(conn, length: 1_000_000) do
+          {:ok, body, conn} ->
+            decode_and_dispatch(conn, token, body)
+
+          {:more, _partial_body, conn} ->
+            send_json(conn, 413, %{"error" => "Request body is too large"})
+
+          {:error, _reason} ->
+            send_json(conn, 400, %{"error" => "Could not read request body"})
+        end
+
+      {:error, version} ->
+        send_json(conn, 400, %{
+          "error" => "Unsupported MCP-Protocol-Version: #{version}",
+          "supportedVersions" => Dialup.Agent.supported_protocol_versions()
+        })
+    end
+  end
+
+  defp decode_and_dispatch(conn, token, body) do
+    case Jason.decode(body) do
+      {:ok, request} when is_map(request) ->
+        if Map.has_key?(request, "id") do
+          conn
+          |> maybe_put_session_header(token, request)
+          |> send_json(200, Dialup.Agent.rpc(token, request))
+        else
+          # JSON-RPC notification: accept it and return 202 with no body per the spec.
+          _ = Dialup.Agent.rpc(token, request)
+          mcp_accepted(conn)
+        end
+
+      {:ok, _batch_or_scalar} ->
+        # JSON-RPC batching was removed from MCP; reject arrays/scalars cleanly
+        # instead of crashing on a non-object body.
+        send_json(conn, 400, jsonrpc_error(-32_600, "Invalid Request"))
+
+      {:error, _reason} ->
+        send_json(conn, 400, jsonrpc_error(-32_700, "Parse error"))
+    end
+  end
+
+  defp mcp_delete(conn, token) do
+    with {:ok, pid} <- Dialup.Agent.lookup(token),
+         :ok <- Dialup.UserSessionProcess.revoke_agent(pid, token) do
+      send_json(conn, 200, %{"revoked" => true})
+    else
+      _ -> send_json(conn, 404, %{"error" => "Session is no longer available"})
+    end
+  end
+
+  defp mcp_unauthorized(conn) do
+    conn
+    |> Plug.Conn.put_resp_header("www-authenticate", "Bearer")
+    |> send_json(401, %{
+      "error" => "Missing session token. Provide it via Authorization: Bearer or Mcp-Session-Id."
+    })
+  end
+
+  # initialize is where a stateful MCP session is established, so advertise the token as
+  # the session id; standard clients echo it back via Mcp-Session-Id on later requests.
+  defp maybe_put_session_header(conn, token, %{"method" => "initialize"}) do
+    Plug.Conn.put_resp_header(conn, "mcp-session-id", token)
+  end
+
+  defp maybe_put_session_header(conn, _token, _request), do: conn
+
+  defp resolve_mcp_token(conn) do
+    bearer =
+      case Plug.Conn.get_req_header(conn, "authorization") do
+        ["Bearer " <> token | _] -> String.trim(token)
+        _ -> nil
+      end
+
+    bearer || (conn |> Plug.Conn.get_req_header("mcp-session-id") |> List.first())
+  end
+
+  defp validate_protocol_version(conn) do
+    case Plug.Conn.get_req_header(conn, "mcp-protocol-version") do
+      [] ->
+        :ok
+
+      [version | _] ->
+        if version in Dialup.Agent.supported_protocol_versions(),
+          do: :ok,
+          else: {:error, version}
+    end
+  end
+
+  defp sse_requested?(conn) do
+    conn
+    |> Plug.Conn.get_req_header("accept")
+    |> Enum.any?(&String.contains?(&1, "text/event-stream"))
+  end
+
+  defp jsonrpc_error(code, message) do
+    %{"jsonrpc" => "2.0", "id" => nil, "error" => %{"code" => code, "message" => message}}
+  end
+
+  defp mcp_accepted(conn) do
+    conn
+    |> put_resp_header("mcp-protocol-version", Dialup.Agent.protocol_version())
+    |> send_resp(202, "")
+  end
+
   defp send_json(conn, status, payload) do
     conn
-    |> put_resp_header("mcp-protocol-version", "2025-11-25")
+    |> put_resp_header("mcp-protocol-version", Dialup.Agent.protocol_version())
     |> put_resp_content_type("application/json")
     |> send_resp(status, Jason.encode!(payload))
   end
