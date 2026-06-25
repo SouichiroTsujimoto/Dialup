@@ -1,0 +1,48 @@
+name: Cursor Issue Implementation Webhook
+
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  notify-cursor:
+    if: contains(join(github.event.issue.labels.*.name, ','), 'agent-implement')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send issue to Cursor Automation
+        env:
+          CURSOR_WEBHOOK_URL: ${{ secrets.CURSOR_ISSUE_WEBHOOK_URL }}
+          CURSOR_TOKEN: ${{ secrets.CURSOR_AUTOMATION_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
+        run: |
+          if [ -z "$CURSOR_WEBHOOK_URL" ] || [ -z "$CURSOR_TOKEN" ]; then
+            echo "Cursor webhook secrets are not configured. Skipping."
+            exit 0
+          fi
+
+          jq -n \
+            --arg event "issue_ready_for_implementation" \
+            --arg repository "$REPOSITORY" \
+            --argjson issue_number "$ISSUE_NUMBER" \
+            --arg issue_url "$ISSUE_URL" \
+            --arg title "$ISSUE_TITLE" \
+            --arg body "${ISSUE_BODY:-}" \
+            --arg labels "$ISSUE_LABELS" \
+            '{
+              event: $event,
+              repository: $repository,
+              issue_number: $issue_number,
+              issue_url: $issue_url,
+              title: $title,
+              body: $body,
+              labels: ($labels | split(",") | map(select(length > 0)))
+            }' \
+          | curl -sfS -X POST "$CURSOR_WEBHOOK_URL" \
+              -H "Authorization: Bearer $CURSOR_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d @-
