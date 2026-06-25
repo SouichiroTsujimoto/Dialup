@@ -1,4 +1,5 @@
-FROM elixir:1.19-alpine
+# build
+FROM elixir:1.19-alpine AS build
 
 WORKDIR /build
 
@@ -18,11 +19,19 @@ COPY site/priv/ site/priv/
 
 ENV MIX_ENV=prod
 WORKDIR /build/site
-RUN mix deps.get --only prod && mix compile
+RUN mix deps.get --only prod && mix release
 
-# ランタイム: site/mix.exs の path: ".." が /build を指すよう同じレイアウトを維持
-WORKDIR /build/site
+# runtime
+FROM alpine:3.23 AS runtime
+
+RUN apk add --no-cache libstdc++ openssl ncurses-libs
+
+ENV MIX_ENV=prod LANG=C.UTF-8
+
+WORKDIR /app
+
+COPY --from=build /build/site/_build/prod/rel/dialup_site ./
 
 EXPOSE 4001
 
-CMD ["mix", "run", "--no-halt"]
+CMD ["bin/dialup_site", "start"]
