@@ -93,6 +93,8 @@ Issue automation:
 2. Confirm the GitHub workflow posts to the Cursor webhook.
 3. Confirm a branch/PR is created or a decision comment is posted on the issue.
 
+Issue #13 was used to validate this issue automation smoke test.
+
 ## Human Decision Rules
 
 Automations should stop and ask when the work involves:
