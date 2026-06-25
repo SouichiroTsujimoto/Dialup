@@ -51,7 +51,9 @@ Setup:
 
 The GitHub workflow is already in `.github/workflows/cursor-issue-webhook.yml`.
 
-## Labels
+Note: GitHub only runs issue-triggered workflows from the default branch. Merge the setup PR to `master` before expecting issue webhooks to fire.
+
+After saving the Issue Implementation automation:
 
 Recommended labels:
 
