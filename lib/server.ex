@@ -375,14 +375,19 @@ defmodule Dialup.Server do
   defp decode_and_dispatch(conn, token, body) do
     case Jason.decode(body) do
       {:ok, request} when is_map(request) ->
-        if Map.has_key?(request, "id") do
-          conn
-          |> maybe_put_session_header(token, request)
-          |> send_json(200, Dialup.Agent.rpc(token, request))
-        else
-          # JSON-RPC notification: accept it and return 202 with no body per the spec.
-          _ = Dialup.Agent.rpc(token, request)
-          mcp_accepted(conn)
+        cond do
+          jsonrpc_response?(request) ->
+            mcp_accepted(conn)
+
+          Map.has_key?(request, "id") ->
+            conn
+            |> maybe_put_session_header(token, request)
+            |> send_json(200, Dialup.Agent.rpc(token, request))
+
+          true ->
+            # JSON-RPC notification: accept it and return 202 with no body per the spec.
+            _ = Dialup.Agent.rpc(token, request)
+            mcp_accepted(conn)
         end
 
       {:ok, _batch_or_scalar} ->
@@ -452,6 +457,13 @@ defmodule Dialup.Server do
     %{"jsonrpc" => "2.0", "id" => nil, "error" => %{"code" => code, "message" => message}}
   end
 
+  defp jsonrpc_response?(%{"jsonrpc" => "2.0"} = message) do
+    Map.has_key?(message, "id") and not Map.has_key?(message, "method") and
+      (Map.has_key?(message, "result") or Map.has_key?(message, "error"))
+  end
+
+  defp jsonrpc_response?(_message), do: false
+
   defp mcp_accepted(conn) do
     conn
     |> put_resp_header("mcp-protocol-version", Dialup.Agent.protocol_version())
@@ -490,7 +502,7 @@ defmodule Dialup.Server do
         ~s(<link rel="service-desc" type="application/vnd.dialup.agent+json" href="#{href}">),
         ~s(<link rel="help" type="text/plain" href="/llms.txt">),
         ~s(<meta name="dialup-agent-discovery" content="#{href}">),
-        ~s(<meta name="ai-agent-instructions" content="Read #{href} for MCP tool catalog. Use POST /agent/{token} for JSON-RPC tools/list and tools/call.">),
+        ~s(<meta name="ai-agent-instructions" content="Read #{href} for MCP tool catalog. Use POST /mcp with a bearer token for JSON-RPC tools/list and tools/call.">),
         ~s(<script id="dialup-agent-context" type="application/json">),
         safe_json(discovery),
         "</script>"
