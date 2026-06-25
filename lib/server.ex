@@ -422,12 +422,32 @@ defmodule Dialup.Server do
 
   defp resolve_mcp_token(conn) do
     bearer =
-      case Plug.Conn.get_req_header(conn, "authorization") do
-        ["Bearer " <> token | _] -> String.trim(token)
-        _ -> nil
-      end
+      conn
+      |> Plug.Conn.get_req_header("authorization")
+      |> Enum.find_value(&bearer_token/1)
 
-    bearer || (conn |> Plug.Conn.get_req_header("mcp-session-id") |> List.first())
+    session_id =
+      conn
+      |> Plug.Conn.get_req_header("mcp-session-id")
+      |> Enum.find_value(&normalize_token/1)
+
+    bearer || session_id
+  end
+
+  defp bearer_token(header) do
+    case String.split(header, " ", parts: 2, trim: true) do
+      [scheme, token] ->
+        if String.downcase(scheme) == "bearer", do: normalize_token(token), else: nil
+
+      _ -> nil
+    end
+  end
+
+  defp normalize_token(token) when is_binary(token) do
+    case String.trim(token) do
+      "" -> nil
+      trimmed -> trimmed
+    end
   end
 
   defp validate_protocol_version(conn) do

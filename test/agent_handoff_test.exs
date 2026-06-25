@@ -269,6 +269,19 @@ defmodule Dialup.AgentHandoffTest do
     assert Jason.decode!(conn.resp_body)["id"] == 7
   end
 
+  test "/mcp accepts a case-insensitive bearer auth scheme", %{token: token} do
+    request =
+      Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list", "params" => %{}})
+
+    conn =
+      Plug.Test.conn(:post, "/mcp", request)
+      |> Plug.Conn.put_req_header("authorization", "bearer  #{token}  ")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    assert is_list(Jason.decode!(conn.resp_body)["result"]["tools"])
+  end
+
   test "/mcp accepts the token via the Mcp-Session-Id header", %{token: token} do
     request =
       Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list", "params" => %{}})
@@ -379,6 +392,18 @@ defmodule Dialup.AgentHandoffTest do
 
     assert invalid["result"]["isError"] == true
     assert invalid["result"]["structuredContent"]["reason"] == "invalid_arguments"
+  end
+
+  test "non-object tool arguments are returned as tool errors", %{token: token} do
+    invalid =
+      rpc(token, 1, "tools/call", %{
+        "name" => "increment",
+        "arguments" => "not an object"
+      })
+
+    assert invalid["result"]["isError"] == true
+    assert invalid["result"]["structuredContent"]["reason"] == "invalid_arguments"
+    assert hd(invalid["result"]["structuredContent"]["errors"])["field"] == "arguments"
   end
 
   test "grants can be revoked", %{pid: pid, token: token} do

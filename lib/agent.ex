@@ -397,6 +397,18 @@ defmodule Dialup.Agent do
        }) do
     arguments = Map.get(params, "arguments", %{})
 
+    if is_map(arguments) do
+      dispatch_tool_call(pid, token, name, arguments)
+    else
+      {:ok,
+       tool_error("Invalid tool arguments.", %{
+         "reason" => "invalid_arguments",
+         "errors" => [%{"field" => "arguments", "message" => "must be an object"}]
+       })}
+    end
+  end
+
+  defp dispatch_tool_call(pid, token, name, arguments) do
     case UserSessionProcess.agent_call(pid, token, name, arguments) do
       {:ok, result} ->
         {:ok,
