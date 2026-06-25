@@ -6,7 +6,7 @@ on:
 
 jobs:
   notify-cursor:
-    if: contains(join(github.event.issue.labels.*.name, ','), 'agent-implement')
+    if: contains(github.event.issue.labels.*.name, 'agent-implement')
     runs-on: ubuntu-latest
     steps:
       - name: Send issue to Cursor Automation
