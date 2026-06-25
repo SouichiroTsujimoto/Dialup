@@ -21,10 +21,16 @@ Behavior:
 
 Setup:
 
-1. Open Cursor Automations.
-2. Create a new automation from `.cursor/automations/pr-review-and-repair.json`.
-3. Confirm the repo scope is `SouichiroTsujimoto/Dialup`.
+1. Delete the empty placeholder automation if one already exists.
+2. Open a new automation draft from `.cursor/automations/pr-review-and-repair.json`.
+3. Confirm these fields are populated before saving:
+   - Repository: `SouichiroTsujimoto/Dialup`
+   - Triggers: PR opened, PR pushed, CI completed
+   - Tool: Comment on pull request
+   - Instructions: contents of `.cursor/automations/pr-review-and-repair.prompt.md`
 4. Save and activate the automation.
+
+If the editor opens empty, the JSON prefill was dropped. Use the manual checklist above and copy the prompt file into Agent Instructions.
 
 ## 2. Issue Implementation
 
@@ -41,8 +47,12 @@ Behavior:
 
 Setup:
 
-1. Open Cursor Automations.
-2. Create a new automation from `.cursor/automations/issue-implementation.json`.
+1. Open a new automation draft from `.cursor/automations/issue-implementation.json`.
+2. Confirm these fields are populated before saving:
+   - Repository: `SouichiroTsujimoto/Dialup`
+   - Trigger: Webhook
+   - Tool: Comment on pull request
+   - Instructions: contents of `.cursor/automations/issue-implementation.prompt.md`
 3. Save the automation once to generate the webhook URL and API token.
 4. Add GitHub repository secrets:
    - `CURSOR_ISSUE_WEBHOOK_URL`: webhook URL from the saved automation
