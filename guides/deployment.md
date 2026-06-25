@@ -113,7 +113,35 @@ sudo systemctl status my_app
 
 ## Docker
 
-### Dockerfile
+Dialup 公式サイト（`site/`）はリポジトリルートの [`Dockerfile`](../Dockerfile) で `mix release` ベースのマルチステージイメージをビルドする。
+
+```bash
+docker build -t dialup-site .
+docker run -p 4001:4001 -e PORT=4001 dialup-site
+```
+
+ローカル検証は `docker compose up -d --build` でも可能（[`docker-compose.yml`](../docker-compose.yml)）。
+
+ランタイムイメージには OTP release のみが含まれ、`bin/dialup_site start` で起動する。
+
+### Dockerfile（mix release・マルチステージ）
+
+```dockerfile
+# build ステージ: モノレポ全体をコピーし site/ で mix release
+FROM elixir:1.19-alpine AS build
+# ... framework + site ソース ...
+RUN mix release
+
+# runtime ステージ: release のみ（build ツール・ソースなし）
+FROM alpine:3.23 AS runtime
+RUN apk add --no-cache libstdc++ openssl ncurses-libs
+COPY --from=build /build/site/_build/prod/rel/dialup_site ./
+CMD ["bin/dialup_site", "start"]
+```
+
+`site/mix.exs` の path 依存 `{:dialup, path: ".."}` はビルドステージでモノレポレイアウトを維持することで release に同梱される。
+
+### 旧: 開発向け単一ステージ（非推奨）
 
 ```dockerfile
 FROM hexpm/elixir:1.19-erlang-26-alpine-3.18
@@ -265,3 +293,145 @@ priv/static/
 - **WebSocket**: ロードバランサーがWebSocketをサポートしているか確認（`Upgrade`ヘッダーの転送が必要）
 - **ファイルアップロード**: `/tmp` など一時ディレクトリの書き込み権限が必要
 - **セッション永続化**: `session_store: :ets` はノード再起動で消える。永続化が必要な場合は外部ストアの検討を
+
+## Dialup 公式サイト本番運用（dialup-framework.org）
+
+モノレポ（`site/` + ルート `Dockerfile`）を UGREEN NAS 上の Coolify VM でホストし、Cloudflare Tunnel で公開する手順。
+
+### アーキテクチャ
+
+```
+GitHub (master push)
+    │
+    ├─► GitHub Actions ──► ghcr.io (任意・Issue #8)
+    │
+    └─► Coolify (UGREEN NAS VM) ──► dialup_site :4001
+              ▲
+    cloudflared (docker-compose.tunnel.yml)
+              │
+         Cloudflare Tunnel
+              │
+    https://dialup-framework.org
+```
+
+### Phase 1: Coolify VM セットアップ（Issue #4）
+
+UGREEN NAS で VM を作成し、Coolify をインストールする。NAS 本体への直載せではなく **VM 上に構築**する。
+
+| 項目 | 推奨値 |
+|------|--------|
+| RAM | 3〜4 GB |
+| ディスク | 20 GB 以上 |
+| OS | Ubuntu 22.04 / 24.04 LTS |
+| ネットワーク | ブリッジ（同一 LAN から管理 UI に到達可能） |
+
+VM に SSH したうえで、リポジトリ付属スクリプトを実行できる:
+
+```bash
+git clone https://github.com/SouichiroTsujimoto/Dialup.git
+cd Dialup
+./scripts/vm-setup-coolify.sh
+```
+
+手動で行う場合:
+
+1. [Coolify 公式インストール](https://coolify.io/docs/get-started/installation)に従い Docker + Coolify をセットアップ
+2. 同一 LAN から Coolify 管理 UI にアクセスできることを確認
+3. **VM スナップショットを取得**（ロールバック用）
+
+### Phase 2: Coolify で site/ をデプロイ（Issue #5）
+
+Coolify に GitHub 連携（Deploy Key または GitHub App）を設定し、次のとおりアプリを登録する。
+
+| 項目 | 値 |
+|------|-----|
+| Repository | `SouichiroTsujimoto/Dialup` |
+| Branch | `master` |
+| Build Pack | Dockerfile |
+| Base Directory | `/` |
+| Dockerfile | `/Dockerfile` |
+| Port | `4001` |
+| 環境変数 | `PORT=4001`, `MIX_ENV=prod` |
+| Auto Deploy | ON |
+
+手順:
+
+1. 手動デプロイでビルド・起動を確認
+2. VM 内から `http://127.0.0.1:4001` で agent demo / docs ページを表示確認
+3. `master` への push で webhook 自動デプロイを確認
+
+**ビルドが OOM または極端に遅い場合**（NAS RAM 7.5 GB、VM 3〜4 GB 割当）: Phase 6（GHCR）を先に実施し、Coolify を「イメージ pull」デプロイに切り替える。
+
+### Phase 3: Cloudflare Tunnel 切替（Issue #6）
+
+Coolify 上のアプリが VM 内で安定稼働していることを確認してから、トンネルの向き先を切り替える。
+
+リポジトリにはアプリとトンネルを分離済み:
+
+- アプリ: [`docker-compose.yml`](../docker-compose.yml)（ローカル検証用）
+- トンネル: [`docker-compose.tunnel.yml`](../docker-compose.tunnel.yml)（`network_mode: host`）
+
+**推奨: VM 上で `docker-compose.tunnel.yml` を別管理**（Coolify アプリネットワークと疎結合）。
+
+1. Cloudflare Zero Trust でトンネルのパブリックホスト名を `http://127.0.0.1:4001` に設定
+2. VM 上でトンネル起動:
+
+```bash
+export CLOUDFLARE_TUNNEL_TOKEN="<token>"
+./scripts/start-cloudflare-tunnel.sh
+```
+
+3. 本番確認:
+   - `https://dialup-framework.org` の表示
+   - WebSocket `/ws`
+   - agent MCP `POST /agent/:token`
+4. **旧 NAS compose の app コンテナを停止**してもサイトが稼働することを確認
+
+#### ロールバック
+
+- 旧 compose は **1 週間は停止のみ**（削除しない）で保持
+- Cloudflare トンネル設定のスクリーンショット / メモを残す
+
+### Phase 4: 旧構成撤去（Issue #7）
+
+トンネル切替完了後:
+
+1. NAS 上の旧 2 リポジトリ clone / 旧 compose プロセスを停止
+2. 1 週間経過後: 旧 compose ファイル・`.env` を削除
+3. ローカルに旧 `dialup_site/` ディレクトリが残っていれば削除（任意）
+
+ローカル再現手順:
+
+```bash
+git clone https://github.com/SouichiroTsujimoto/Dialup.git
+cd Dialup
+docker compose up -d --build
+# トンネルは docker-compose.tunnel.yml で別管理
+```
+
+### Phase 5: GHCR + GitHub Actions（Issue #8・任意）
+
+VM 上での Elixir コンパイルを避け、GitHub Actions でイメージをビルドして GHCR に publish する。
+
+ワークフロー: [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml)
+
+- `master` push で `ghcr.io/<owner>/dialup` に `latest` と commit SHA タグで publish
+- Coolify: ビルド pack を「Dockerfile ビルド」から「既存イメージ pull」に変更
+- GHCR 認証: GitHub PAT（`read:packages`）または Deploy Token を Coolify に設定
+
+```
+git push master → Actions build → GHCR push → Coolify pull & deploy
+```
+
+イメージ例: `ghcr.io/souichiroltsujimoto/dialup:latest`
+
+### チェックリスト（Issue 対応表）
+
+| Issue | 完了条件 |
+|-------|----------|
+| #4 | Coolify ダッシュボードが VM 上で安定、LAN から管理 UI に到達可能 |
+| #5 | `master` push で自動デプロイ、VM 上でサイト表示 |
+| #6 | `dialup-framework.org` が Coolify 先を指す、旧 app 停止後も稼働 |
+| #7 | 旧デプロイプロセスなし、本ドキュメントだけで再デプロイ可能 |
+| #8 | VM でコンパイルなしデプロイ、時間短縮 |
+| #9 | ランタイムイメージに build ツール・ソースなし、`bin/dialup_site start` で起動 |
