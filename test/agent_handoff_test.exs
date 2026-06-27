@@ -373,6 +373,19 @@ defmodule Dialup.AgentHandoffTest do
     assert Jason.decode!(batch.resp_body)["error"]["code"] == -32_600
   end
 
+  test "JSON-RPC response bodies are accepted without a response", %{token: token} do
+    conn =
+      Plug.Test.conn(
+        :post,
+        "/agent/#{token}",
+        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 99, "result" => %{}})
+      )
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 202
+    assert conn.resp_body == ""
+  end
+
   test "stale versions and invalid arguments are rejected", %{token: token} do
     stale =
       rpc(token, 1, "tools/call", %{
@@ -514,7 +527,7 @@ defmodule Dialup.AgentHandoffTest do
     assert conn.resp_body =~ "A shared counter operated by a human and an agent."
     assert conn.resp_body =~ ~s(rel="service-desc")
     assert conn.resp_body =~ ~s(href="/llms.txt")
-    assert conn.resp_body =~ "POST /agent/{token}"
+    assert conn.resp_body =~ "POST /mcp with a bearer token"
     refute conn.resp_body =~ ~s(style="display)
   end
 
@@ -527,8 +540,10 @@ defmodule Dialup.AgentHandoffTest do
 
     assert discovery["connection"]["status"] == "connected"
     assert discovery["connection"]["endpoint"] == "/agent/#{token}"
+    assert discovery["connection"]["mcpEndpoint"] == "/mcp"
     refute Map.has_key?(discovery["connection"], "websocket")
-    assert discovery["protocolGuide"]["transport"]["http"] =~ "/agent/#{token}"
+    assert discovery["protocolGuide"]["transport"]["http"] =~ "/mcp"
+    assert discovery["protocolGuide"]["transport"]["pathTokenHttp"] =~ "/agent/#{token}"
     assert discovery["protocolGuide"]["versioning"]["staleResult"] =~ "isError"
     assert discovery["protocolGuide"]["versioning"]["recovery"] =~ "read_scene"
     assert discovery["protocolGuide"]["humanConfirmation"] =~ "confirm=human"
@@ -546,6 +561,7 @@ defmodule Dialup.AgentHandoffTest do
              "A shared counter operated by a human and an agent."
 
     assert discovery["connection"]["status"] == "no_live_session"
+    assert discovery["connection"]["httpEndpoint"] == "/mcp"
     assert discovery["accessModel"]["pageUrl"] =~ "does not authenticate"
     assert discovery["accessModel"]["sessionToken"] =~ "/agent/"
     assert length(discovery["agentQuickstart"]["steps"]) >= 6

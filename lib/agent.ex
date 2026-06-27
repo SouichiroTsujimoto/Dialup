@@ -251,7 +251,8 @@ defmodule Dialup.Agent do
           "The ordinary page URL exposes the tool catalog but does not authenticate an agent " <>
             "to a live browser session.",
         "sessionToken" =>
-          "POST JSON-RPC to `/agent/{token}` with a bearer token issued for one live session.",
+          "POST JSON-RPC to `/mcp` with `Authorization: Bearer {token}` or " <>
+            "`Mcp-Session-Id: {token}`. `/agent/{token}` remains available as a path-token endpoint.",
         "tokenSources" => [
           "POST `/_dialup/agent-handoff?tab_id=...` from the user's open browser tab",
           "Server-side `Dialup.Session.grant/2` for programmatic access"
@@ -263,6 +264,7 @@ defmodule Dialup.Agent do
         "status" => "no_live_session",
         "instructions" =>
           "Obtain a session token, then POST JSON-RPC 2.0 to the HTTP MCP endpoint.",
+        "httpEndpoint" => "/mcp",
         "httpEndpointTemplate" => "/agent/{session-token}",
         "protocolVersion" => @protocol_version
       },
@@ -271,7 +273,7 @@ defmodule Dialup.Agent do
         "steps" => [
           "Fetch this discovery document for page concepts and the static tool catalog.",
           "Obtain a session bearer token for the target live session.",
-          "POST initialize to `/agent/{token}`.",
+          "POST initialize to `/mcp` with `Authorization: Bearer {token}`.",
           "POST tools/list to read generated tools from page declarations.",
           "POST tools/call read_scene to read the current semantic scene and version.",
           "POST tools/call for mutating actions with the latest `_version` in arguments.",
@@ -300,11 +302,13 @@ defmodule Dialup.Agent do
       %{
         "status" => "connected",
         "endpoint" => endpoint(token),
+        "mcpEndpoint" => "/mcp",
         "stateVersion" => version,
         "grant" => Dialup.Agent.Grant.public(grant),
         "protocolVersion" => @protocol_version,
         "instructions" =>
-          "POST JSON-RPC 2.0 requests to endpoint with Content-Type: application/json."
+          "POST JSON-RPC 2.0 requests to /mcp with Content-Type: application/json " <>
+            "and the session token as Authorization: Bearer or Mcp-Session-Id."
       }
     )
     |> Map.put("protocolGuide", protocol_guide(token))
@@ -576,7 +580,9 @@ defmodule Dialup.Agent do
 
     %{
       "transport" => %{
-        "http" => "POST #{endpoint} with Content-Type: application/json"
+        "http" =>
+          "POST /mcp with Content-Type: application/json and Authorization: Bearer #{token}",
+        "pathTokenHttp" => "POST #{endpoint} with Content-Type: application/json"
       },
       "requests" => %{
         "initialize" => %{
