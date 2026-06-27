@@ -3,6 +3,26 @@ defmodule Dialup.App.Docs.Page do
 
   def page_title(_assigns), do: "Getting Started — Dialup"
 
+  def agent_state(_assigns), do: %{}
+
+  def agent_message(_assigns) do
+    %{
+      concept:
+        "Getting Started documentation for Dialup. Read-only page with no mutable state. " <>
+          "Use navigation tools to reach other docs or demos.",
+      goal: "Understand how to install and bootstrap a Dialup application."
+    }
+  end
+
+  def agent_grant(_assigns) do
+    %{
+      capabilities: :all,
+      projections: [:state, :actions],
+      expires_in: :timer.minutes(15),
+      require_version: false
+    }
+  end
+
   defp code_new, do: ~S|# `dialup_new`コマンドをインストール(初回のみ)
 mix archive.install hex dialup_new
 

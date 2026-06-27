@@ -3,6 +3,26 @@ defmodule Dialup.App.Docs.Concepts.Page do
 
   def page_title(_assigns), do: "Architecture — Dialup"
 
+  def agent_state(_assigns), do: %{}
+
+  def agent_message(_assigns) do
+    %{
+      concept:
+        "Architecture and lifecycle documentation for Dialup. Read-only page with no mutable state.",
+      goal:
+        "Understand the 1-tab-1-process model, session vs assigns, file-based routing, and HTTP MCP."
+    }
+  end
+
+  def agent_grant(_assigns) do
+    %{
+      capabilities: :all,
+      projections: [:state, :actions],
+      expires_in: :timer.minutes(15),
+      require_version: false
+    }
+  end
+
   defp code_arch, do: ~S|【ブラウザ】
   dialup.js
   ├── WebSocket 接続管理（Cookie 経由のセッション ID）

@@ -285,7 +285,7 @@ my_app/
 h1 { font-size: 3rem; }
 ```
 
-CSS はモジュール名由来の一意なクラス（`d-xxxxxxx`）でラップされ、他ページへの影響を防ぐ。`layout.css` はその layout が包む全子ページに自然にカスケードする。詳細は [Routing](./routing.md#コロケーション-css) を参照。
+CSS はモジュール名由来の一意なクラス（`d-xxxxxxx`）でラップされ、他ページへの影響を防ぐ。`layout.css` はその layout が包む全子ページに自然にカスケードする。詳細は [Routing](./routing.md#コロケーション-css) を参照。エージェントが「ページごとに CSS が分離されている」と誤解しがちな点は [Agent pitfalls](./agent-pitfalls.md#1-layoutcss-classes-already-apply-on-every-page) を参照。
 
 ### 命名規則
 

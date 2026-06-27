@@ -3,6 +3,25 @@ defmodule Dialup.App.Docs.Api.Page do
 
   def page_title(_assigns), do: "API Reference — Dialup"
 
+  def agent_state(_assigns), do: %{}
+
+  def agent_message(_assigns) do
+    %{
+      concept:
+        "API reference documentation for Dialup. Read-only page with no mutable state.",
+      goal: "Look up use Dialup options, handle_event return values, HTML attributes, and helpers."
+    }
+  end
+
+  def agent_grant(_assigns) do
+    %{
+      capabilities: :all,
+      projections: [:state, :actions],
+      expires_in: :timer.minutes(15),
+      require_version: false
+    }
+  end
+
   # ── コード例 ──────────────────────────────────────────────────────────────
   # """ ヒアドキュメントを使う。閉じる """ の手前の空白がトリミングされる。
   # テンプレートから {code_xxx()} で呼ぶ。
@@ -176,7 +195,9 @@ defmodule Dialup.App.Docs.Api.Page do
     <h1>API リファレンス</h1>
     <p class="page-lead">
       Dialup が提供する主要な API を説明します。
-      完全なリファレンスは <code>mix docs</code> で生成される HexDocs で確認できます。
+      完全なリファレンスは
+      <a href="https://hexdocs.pm/dialup/" class="inline-link" target="_blank" rel="noopener">HexDocs</a>
+      で確認できます。
     </p>
 
     <h2>use Dialup オプション</h2>

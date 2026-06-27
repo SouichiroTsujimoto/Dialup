@@ -3,6 +3,26 @@ defmodule Dialup.App.Page do
 
   def page_title(_assigns), do: "Dialup — WebSocket-first Elixir Framework with HTTP MCP"
 
+  def agent_state(_assigns), do: %{}
+
+  def agent_message(_assigns) do
+    %{
+      concept:
+        "The landing page of dialup-framework.org. No mutable state. " <>
+          "Use navigation tools to reach other pages.",
+      goal: "Read this page to understand Dialup, then navigate to a target page."
+    }
+  end
+
+  def agent_grant(_assigns) do
+    %{
+      capabilities: :all,
+      projections: [:state, :actions],
+      expires_in: :timer.minutes(15),
+      require_version: false
+    }
+  end
+
   defp counter_example, do: ~S|
 defmodule Dialup.App.Counter do
   use Dialup.Page
@@ -52,9 +72,9 @@ render the action button with dialup_action in HEEx|
         <strong>UI を書くだけで MCP API が自動生成</strong>されるのが最大の特徴です。
       </p>
       <div class="hero-actions">
-        <.dialup_action navigate="/agent_demo" class="btn btn-primary">MCP Live Demo &rarr;</.dialup_action>
         <.dialup_action navigate="/docs" class="btn btn-ghost">Get Started</.dialup_action>
-        <.dialup_action navigate="/demo" class="btn btn-ghost">UI Demo</.dialup_action>
+        <.dialup_action navigate="/agent_demo" class="btn btn-primary">MCP Live Demo &rarr;</.dialup_action>
+        <.dialup_action navigate="/demo" class="btn btn-primary">UI Demo</.dialup_action>
       </div>
 
       <div class="hero-code">
@@ -71,7 +91,7 @@ render the action button with dialup_action in HEEx|
     <section class="section mcp-spotlight">
       <div class="container">
         <div class="section-title">
-          <h2>UI から MCP API が生える</h2>
+          <h2>UI から MCP サーバが生える</h2>
           <p>
             <code>&lt;.dialup_action&gt;</code> と <code>declare_action</code> を書くだけ。
             別途 REST を設計する必要はありません。
@@ -83,7 +103,7 @@ render the action button with dialup_action in HEEx|
             <h3>人間向け UI を書く</h3>
             <pre class="mcp-spotlight-code"><code>{mcp_step1()}</code></pre>
           </div>
-          <div class="mcp-spotlight-card mcp-spotlight-card-accent">
+          <div class="mcp-spotlight-card">
             <span class="mcp-spotlight-step">2</span>
             <h3>ツールが自動生成される</h3>
             <pre class="mcp-spotlight-code"><code>{mcp_step2()}</code></pre>
@@ -96,7 +116,7 @@ render the action button with dialup_action in HEEx|
         </div>
         <div class="section-content mcp-spotlight-cta">
           <.dialup_action navigate="/agent_demo" name={:navigate_agent_demo_spotlight} class="btn btn-primary">
-            左右分割のライブデモを見る &rarr;
+            MCP Live Demo &rarr;
           </.dialup_action>
         </div>
       </div>
@@ -183,7 +203,7 @@ render the action button with dialup_action in HEEx|
               </tr>
               <tr>
                 <td>AI Agent API</td>
-                <td class="highlight-col">UI 宣言から HTTP MCP 自動生成</td>
+                <td class="highlight-col">MCPサーバ自動生成</td>
                 <td>別途実装</td>
                 <td>別途実装</td>
               </tr>
@@ -213,7 +233,7 @@ render the action button with dialup_action in HEEx|
         </div>
         <div class="section-content hero-actions" style="justify-content: center;">
           <.dialup_action navigate="/agent_demo" name={:navigate_agent_demo_footer} class="btn btn-primary">MCP Live Demo &rarr;</.dialup_action>
-          <.dialup_action navigate="/demo" name={:navigate_demo_footer} class="btn btn-ghost">UI Demo</.dialup_action>
+          <.dialup_action navigate="/demo" name={:navigate_demo_footer} class="btn btn-primary">UI Demo</.dialup_action>
         </div>
       </div>
     </section>
