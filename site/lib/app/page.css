@@ -161,9 +161,6 @@
   font-family: "Fira Code", Consolas, monospace;
 }
 .mcp-spotlight-cta { margin-top: 2rem; }
-.mcp-feature-card {
-  border-width: 2px;
-}
 
 @media (max-width: 900px) {
   .mcp-spotlight-grid { grid-template-columns: 1fr; }

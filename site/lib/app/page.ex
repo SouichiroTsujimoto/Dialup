@@ -68,8 +68,7 @@ render the action button with dialup_action in HEEx|
       </h1>
       <p class="hero-sub">
         Dialup はサーバー上の GenServer がブラウザの状態を持ち続ける WebSocket ファーストの
-        Elixir フレームワークです。<br/>
-        <strong>UI を書くだけで MCP API が自動生成</strong>されるのが最大の特徴です。
+        Elixir フレームワークです。
       </p>
       <div class="hero-actions">
         <.dialup_action navigate="/docs" class="btn btn-ghost">Get Started</.dialup_action>
@@ -128,20 +127,20 @@ render the action button with dialup_action in HEEx|
         <p>1 tab = 1 process で、全てのページにまたがってセッションが継続。<br/>状態はサーバー上に存在し、WebSocket で同期される。</p>
       </div>
       <div class="features container">
-        <div class="feature-card mcp-feature-card">
+        <div class="feature-card">
           <span class="feature-icon">🤖</span>
           <h3>UI → HTTP MCP</h3>
           <p>action / region 宣言から <code>tools/list</code> と <code>tools/call</code> を自動生成。人間は WebSocket、AI は JSON-RPC。</p>
         </div>
         <div class="feature-card">
-          <span class="feature-icon">📁</span>
-          <h3>ファイルベースルーティング</h3>
-          <p><code>app/users/[id]/page.ex</code> を置くだけで <code>/users/:id</code> になる。<code>router.ex</code> への手書き登録は不要。</p>
-        </div>
-        <div class="feature-card">
           <span class="feature-icon">⚡</span>
           <h3>1 tab = 1 process</h3>
           <p>各セッションが独立した GenServer を持つ。状態はサーバー上に存在し、WebSocket で同期される。</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">📁</span>
+          <h3>ファイルベースルーティング</h3>
+          <p><code>app/users/[id]/page.ex</code> を置くだけで <code>/users/:id</code> になる。<code>router.ex</code> への手書き登録は不要。</p>
         </div>
         <div class="feature-card">
           <span class="feature-icon">🔄</span>
@@ -157,11 +156,6 @@ render the action button with dialup_action in HEEx|
           <span class="feature-icon">🪶</span>
           <h3>軽量な依存関係</h3>
           <p>Phoenix 本体は不使用。Bandit + HEEx + idiomorph のみ。クライアント JS は自作 ~100 行 + idiomorph 5KB。</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">🔁</span>
-          <h3>自動再接続</h3>
-          <p>切断を検知したら指数バックオフで再接続。プロセスが生きていれば状態はそのまま復元される。</p>
         </div>
       </div>
     </section>
