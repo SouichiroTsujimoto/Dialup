@@ -38,6 +38,16 @@ cd /path/to/dialup
 mix docs --open
 ```
 
+## メンテナ向け
+
+Dialup フレームワークの新バージョンを Hex に公開するときは、Cursor の **publish-new-version** skill
+（`.cursor/skills/publish-new-version/SKILL.md`）を使う。公開前に次を必ず確認する:
+
+1. **mix docs** — `mix.exs` の `docs.extras`、`lib/` の moduledoc、`guides/` が実態と一致しているか
+2. **dialup-site** — `site/lib/app/docs/` の Getting Started / Architecture / API Reference が実態と一致しているか
+
+公式サイトの `/docs` は `guides/` や HexDocs とは別ソースなので、片方だけ直すとドリフトする。
+
 ## 補足資料
 
 - [GitHub](https://github.com/SouichiroTsujimoto/Dialup) - ソースコード
