@@ -2,12 +2,12 @@
   if (window.__mcpDemoInstalled) return;
   window.__mcpDemoInstalled = true;
 
-  let endpoint = null; // "/agent/TOKEN"
   let version = 0;
   let reqId = 1;
   let busy = false;
 
-  // 現実的なタスク分解（外部 LLM の代わりにキーワードで提案）
+  const handoff = () => window.MCPHandoff;
+
   const PLANS = [
     {
       kw: ["引っ越", "引越"],
@@ -66,9 +66,11 @@
   }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const absoluteEndpoint = () => (endpoint ? location.origin + endpoint : "");
 
   async function rpc(method, params = {}) {
+    const endpoint = handoff()?.endpoint;
+    if (!endpoint) throw new Error("MCP エンドポイントが未発行です");
+
     const id = reqId++;
     const res = await fetch(endpoint, {
       method: "POST",
@@ -86,35 +88,16 @@
   }
 
   async function doHandoff(btn) {
-    const dialup = window.DialupApp;
-    if (!dialup?.tabId) {
-      setStatus("セッションの準備中です。少し待って再度お試しください。");
-      return;
-    }
-
     btn.disabled = true;
     setStatus("エンドポイントを発行中…");
 
     try {
-      const res = await fetch(
-        `/_dialup/agent-handoff?tab_id=${encodeURIComponent(dialup.tabId)}`,
-        { method: "POST", credentials: "same-origin" }
-      );
+      const result = await handoff().issueHandoff();
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `発行に失敗しました (${res.status})`);
-      }
-
-      const handoff = await res.json();
-      endpoint = handoff.endpoint;
-
-      // セッション情報をページ状態に保存して、サーバー側で詳細を描画させる。
-      // url はフル URL（オリジン込み）。表示・コピーともこの値を使う。
-      dialup.send("register_handoff", {
-        endpoint: handoff.endpoint,
-        url: absoluteEndpoint(),
-        expiresInMs: handoff.grant?.expiresInMs,
+      window.DialupApp.send("register_handoff", {
+        endpoint: result.endpoint,
+        url: result.url,
+        expiresInMs: result.grant?.expiresInMs,
       });
     } catch (error) {
       setStatus(error.message);
@@ -123,14 +106,13 @@
   }
 
   async function runDemo(btn) {
-    if (busy || !endpoint) return;
+    if (busy || !handoff()?.endpoint) return;
     busy = true;
     const label = btn.textContent;
     btn.disabled = true;
     btn.textContent = "🤖 AI が作業中…";
 
     try {
-      // 作業中は人間が画面を操作できないようロックする
       await rpc("tools/call", {
         name: "lock_ui",
         arguments: { reason: "AI がタスクを追加しています…" },
@@ -158,7 +140,6 @@
     } catch (error) {
       btn.textContent = `エラー: ${error.message}`;
     } finally {
-      // 必ず人間に操作を返す
       try {
         await rpc("tools/call", { name: "unlock_ui", arguments: {} });
       } catch (_error) {
@@ -172,45 +153,14 @@
     }
   }
 
-  async function copyFrom(btn) {
-    const card = btn.closest("[data-mcp-card]");
-    const sel = btn.getAttribute("data-mcp-copy");
-    const el = card?.querySelector(`[data-mcp-text="${sel}"]`);
-    const text = el ? el.textContent.trim() : "";
-
-    try {
-      await navigator.clipboard.writeText(text);
-      const prev = btn.textContent;
-      btn.textContent = "コピーしました";
-      setTimeout(() => {
-        btn.textContent = prev;
-      }, 1200);
-    } catch (_error) {
-      // クリップボード非対応環境は無視
-    }
-  }
-
   document.addEventListener("click", (event) => {
-    const handoff = event.target.closest('[data-mcp="handoff"]');
-    if (handoff) return doHandoff(handoff);
+    const handoffBtn = event.target.closest('[data-mcp="handoff"]');
+    if (handoffBtn) return doHandoff(handoffBtn);
 
     const run = event.target.closest('[data-mcp="run-demo"]');
     if (run) return runDemo(run);
 
     const copy = event.target.closest("[data-mcp-copy]");
-    if (copy) return copyFrom(copy);
+    if (copy?.closest("[data-mcp-card]")) return handoff()?.copyFrom(copy);
   });
-
-  // 再接続後など、すでにカードがエンドポイントを持っていれば JS 状態を復元する
-  function syncEndpoint() {
-    const card = document.querySelector("[data-mcp-card]");
-    const path = card?.getAttribute("data-mcp-endpoint");
-    if (path && !endpoint) endpoint = path;
-  }
-
-  new MutationObserver(syncEndpoint).observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
-  syncEndpoint();
 })();

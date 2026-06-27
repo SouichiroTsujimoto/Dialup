@@ -111,12 +111,13 @@ defmodule Dialup.App.AgentDemo.Page do
   end
 
   def handle_event(:set_project, value, assigns) when is_binary(value) do
-    {:update, overwrite(assigns, %{project: value})}
+    {:noreply, overwrite(assigns, %{project: value})}
   end
 
   def handle_event(:set_project, params, assigns) when is_map(params) do
     value = params["value"] || params[:value] || ""
-    {:update, overwrite(assigns, %{project: to_string(value)})}
+    new_assigns = overwrite(assigns, %{project: to_string(value)})
+    {:patch, "mcp-project-input", render_project_input(new_assigns), new_assigns}
   end
 
   def handle_event("register_handoff", %{"endpoint" => endpoint} = params, assigns) do
@@ -156,6 +157,19 @@ defmodule Dialup.App.AgentDemo.Page do
       ~s("params":{"name":"read_scene","arguments":{}}}')
   end
 
+  defp render_project_input(assigns) do
+    ~H"""
+    <input
+      id="mcp-project-input"
+      class="mcp-project-input"
+      value={@project}
+      ws-change="set_project"
+      ws-debounce="400"
+      placeholder="例: 社内勉強会の企画"
+    />
+    """
+  end
+
   def render(assigns) do
     ~H"""
     <div class="mcp-demo">
@@ -187,13 +201,7 @@ defmodule Dialup.App.AgentDemo.Page do
             <div class="mcp-board-head">
               <span class="mcp-demo-tag">DEMO · TODO リスト</span>
               <label class="mcp-project-label">プロジェクトの目標</label>
-              <input
-                class="mcp-project-input"
-                value={@project}
-                ws-change="set_project"
-                ws-debounce="400"
-                placeholder="例: 社内勉強会の企画"
-              />
+              {render_project_input(assigns)}
             </div>
 
             <ul class="mcp-tasks">
@@ -211,7 +219,7 @@ defmodule Dialup.App.AgentDemo.Page do
                   :if={not t.done}
                   name={:complete_task}
                   task_id={t.id}
-                  class="mcp-task-done"
+                  class="btn btn-primary btn-sm"
                 >
                   完了
                 </.dialup_action>
@@ -221,12 +229,12 @@ defmodule Dialup.App.AgentDemo.Page do
 
             <form ws-submit="add_task" class="mcp-add">
               <input name="title" placeholder="タスクを入力して Enter" autocomplete="off" />
-              <button type="submit">追加</button>
+              <button type="submit" class="btn btn-ghost btn-sm">追加</button>
             </form>
 
             <div :if={Enum.any?(@tasks, & &1.done)} class="mcp-board-foot">
               <span>完了 {Enum.count(@tasks, & &1.done)} 件</span>
-              <.dialup_action name={:clear_completed} class="mcp-clear-btn">
+              <.dialup_action name={:clear_completed} class="btn btn-primary btn-sm">
                 完了済みを削除
               </.dialup_action>
             </div>
@@ -244,23 +252,23 @@ defmodule Dialup.App.AgentDemo.Page do
               <label class="mcp-field-label">MCP エンドポイント（フル URL）</label>
               <div class="mcp-copy-row">
                 <code class="mcp-endpoint" data-mcp-text="endpoint">{@handoff.url}</code>
-                <button type="button" class="mcp-copy" data-mcp-copy="endpoint">コピー</button>
+                <button type="button" class="btn btn-primary btn-sm" data-mcp-copy="endpoint">コピー</button>
               </div>
 
               <label class="mcp-field-label">お使いの AI に貼り付けるプロンプト</label>
               <div class="mcp-copy-block">
                 <pre data-mcp-text="prompt">{prompt_text(@handoff.url)}</pre>
-                <button type="button" class="mcp-copy" data-mcp-copy="prompt">プロンプトをコピー</button>
+                <button type="button" class="btn btn-primary btn-sm" data-mcp-copy="prompt">プロンプトをコピー</button>
               </div>
 
               <details class="mcp-curl">
                 <summary>curl で試す</summary>
                 <pre data-mcp-text="curl">{curl_text(@handoff.url)}</pre>
-                <button type="button" class="mcp-copy" data-mcp-copy="curl">curl をコピー</button>
+                <button type="button" class="btn btn-primary btn-sm" data-mcp-copy="curl">curl をコピー</button>
               </details>
 
               <div class="mcp-demo-run">
-                <button type="button" class="mcp-run-btn" data-mcp="run-demo">
+                <button type="button" class="btn btn-accent btn-block" data-mcp="run-demo">
                   ▶ デモ AI を実行（外部 AI 不要）
                 </button>
                 <p class="mcp-demo-hint">
@@ -276,7 +284,7 @@ defmodule Dialup.App.AgentDemo.Page do
                 ボタンを押すと、このライブセッションを操作できる
                 MCP エンドポイントを発行します。
               </p>
-              <button type="button" class="mcp-handoff-btn" data-mcp="handoff">
+              <button type="button" class="btn btn-ghost btn-block" data-mcp="handoff">
                 この画面を AI に渡す →
               </button>
               <p class="mcp-handoff-status" data-mcp-status></p>

@@ -39,6 +39,43 @@ defmodule Dialup.App.Demo.Page do
      })}
   end
 
+  def agent_state(assigns) do
+    %{
+      count: assigns.count,
+      submitted_name: assigns.submitted_name,
+      draft: assigns.draft,
+      draft_confirmed: assigns.draft_confirmed,
+      message_log: assigns.message_log
+    }
+  end
+
+  def agent_message(_assigns) do
+    %{
+      concept:
+        "A showcase of Dialup's interactive UI primitives: counter with partial patch, " <>
+          "form submission, real-time input sync, and a message log.",
+      goal:
+        "Explore each widget to verify that agent-driven mutations produce the same " <>
+          "real-time results as human interaction.",
+      flow: [
+        "Call read_scene to see current widget states.",
+        "Use inc/dec/reset_counter to test the counter.",
+        "Use submit_name to test form submission.",
+        "Use send_message/clear_log for the message log."
+      ],
+      safety: ["clear_log deletes all messages; confirm with the user first."]
+    }
+  end
+
+  def agent_grant(_assigns) do
+    %{
+      capabilities: :all,
+      projections: [:state, :regions, :actions],
+      expires_in: :timer.minutes(15),
+      require_version: true
+    }
+  end
+
   def handle_event(:inc, _, assigns) do
     new_assigns = Map.update!(assigns, :count, &(&1 + 1))
     {:patch, "demo-counter-value", render_counter(new_assigns), new_assigns}
@@ -213,7 +250,7 @@ defmodule Dialup.App.Demo.Page do
         </p>
         <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
           <.dialup_action navigate="/" class="btn btn-primary">← Home</.dialup_action>
-          <.dialup_action navigate="/docs" class="btn btn-primary">Docs</.dialup_action>
+          <.dialup_action navigate="/docs" class="btn btn-primary">Get Started</.dialup_action>
           <.dialup_action navigate="/docs/concepts" class="btn btn-primary">Concepts</.dialup_action>
           <.dialup_action navigate="/docs/api" class="btn btn-primary">API Ref</.dialup_action>
         </div>
