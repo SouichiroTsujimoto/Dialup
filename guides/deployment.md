@@ -296,23 +296,27 @@ priv/static/
 
 ## Dialup 公式サイト本番運用（dialup-framework.org）
 
-モノレポ（`site/` + ルート `Dockerfile`）を UGREEN NAS 上の Coolify VM でホストし、Cloudflare Tunnel で公開する手順。
+モノレポ（`site/` + ルート `Dockerfile`）を UGREEN NAS 上の Coolify VM でホストし、Cloudflare Tunnel で公開する。
+
+**現行構成:** Coolify の GitHub 連携（Deploy Key / GitHub App）は環境上うまく動かなかったため、**GitHub Actions → GHCR → Coolify（イメージ pull）** でデプロイする。VM 上での Elixir コンパイルは行わない。
 
 ### アーキテクチャ
 
 ```
 GitHub (master push)
     │
-    ├─► GitHub Actions ──► ghcr.io (任意・Issue #8)
-    │
-    └─► Coolify (UGREEN NAS VM) ──► dialup_site :4001
-              ▲
-    cloudflared (docker-compose.tunnel.yml)
+    └─► GitHub Actions ──► ghcr.io/<owner>/dialup:latest
               │
-         Cloudflare Tunnel
-              │
-    https://dialup-framework.org
+              └─► Coolify (UGREEN NAS VM) ──► dialup_site :4001
+                        ▲
+          cloudflared (docker-compose.tunnel.yml)
+                        │
+               Cloudflare Tunnel
+                        │
+          https://dialup-framework.org
 ```
+
+GitHub Actions が `master` push のたびに GHCR へイメージを publish する。Coolify は GHCR から pull してコンテナを起動する。Coolify 側に GitHub webhook はないため、**GHCR への push 後は Coolify 管理 UI から手動で再デプロイ**する（下記「再デプロイ」参照）。
 
 ### Phase 1: Coolify VM セットアップ（Issue #4）
 
@@ -339,28 +343,47 @@ cd Dialup
 2. 同一 LAN から Coolify 管理 UI にアクセスできることを確認
 3. **VM スナップショットを取得**（ロールバック用）
 
-### Phase 2: Coolify で site/ をデプロイ（Issue #5）
+### Phase 2: Coolify + GHCR で site/ をデプロイ（Issue #5 / #8）
 
-Coolify に GitHub 連携（Deploy Key または GitHub App）を設定し、次のとおりアプリを登録する。
+GitHub Actions でイメージをビルドし GHCR に publish する。Coolify はリポジトリを clone して Dockerfile ビルドするのではなく、**既存イメージ pull** でデプロイする。
+
+ワークフロー: [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml)
+
+- `master` push（および `workflow_dispatch`）で `ghcr.io/<owner>/dialup` に `latest` と commit SHA タグで publish
+- イメージ例: `ghcr.io/souichirotsujimoto/dialup:latest`
+
+#### Coolify アプリ設定
 
 | 項目 | 値 |
 |------|-----|
-| Repository | `SouichiroTsujimoto/Dialup` |
-| Branch | `master` |
-| Build Pack | Dockerfile |
-| Base Directory | `/` |
-| Dockerfile | `/Dockerfile` |
+| デプロイ方式 | **Docker Image**（既存イメージ pull） |
+| Image | `ghcr.io/souichirotsujimoto/dialup:latest` |
 | Port | `4001` |
 | 環境変数 | `PORT=4001`, `MIX_ENV=prod` |
-| Auto Deploy | ON |
+| GHCR 認証 | GitHub PAT（`read:packages`）または Deploy Token |
 
-手順:
+GitHub 連携（Deploy Key / GitHub App）と Auto Deploy は**使わない**。Coolify からリポジトリへ直接アクセスする必要がない。
 
-1. 手動デプロイでビルド・起動を確認
-2. VM 内から `http://127.0.0.1:4001` で agent demo / docs ページを表示確認
-3. `master` への push で webhook 自動デプロイを確認
+#### 初回セットアップ手順
 
-**ビルドが OOM または極端に遅い場合**（NAS RAM 7.5 GB、VM 3〜4 GB 割当）: Phase 6（GHCR）を先に実施し、Coolify を「イメージ pull」デプロイに切り替える。
+1. `master` に merge し、[Actions の Docker Publish](https://github.com/SouichiroTsujimoto/Dialup/actions/workflows/docker-publish.yml) が成功し GHCR にイメージがあることを確認
+2. Coolify に上記のとおり Docker Image アプリを登録し、GHCR 認証を設定
+3. 手動デプロイで pull・起動を確認
+4. VM 内から `http://127.0.0.1:4001` で agent demo / docs ページを表示確認
+
+#### 再デプロイ
+
+`master` への merge だけでは Coolify 上のコンテナは自動更新されない。
+
+1. `master` に merge（または [workflow_dispatch](https://github.com/SouichiroTsujimoto/Dialup/actions/workflows/docker-publish.yml) で手動実行）
+2. GitHub Actions の **Docker Publish** が完了するまで待つ
+3. Coolify 管理 UI で対象アプリの **Redeploy**（または **Pull latest image & restart**）を実行
+
+特定コミットを pin したい場合は、Coolify の Image タグを SHA タグ（例: `ghcr.io/souichirotsujimoto/dialup:abc1234`）に変更してからデプロイする。
+
+#### 代替: Coolify GitHub 連携 + Dockerfile ビルド（未採用）
+
+Coolify の GitHub 連携を有効にし、リポジトリから Dockerfile をビルドする方式も想定していたが、本番 VM では連携が確立できなかった。NAS RAM 7.5 GB・VM 3〜4 GB 割当では VM 上での Elixir コンパイルは OOM や極端な遅延のリスクもあり、GHCR 経由を採用している。
 
 ### Phase 3: Cloudflare Tunnel 切替（Issue #6）
 
@@ -409,29 +432,13 @@ docker compose up -d --build
 # トンネルは docker-compose.tunnel.yml で別管理
 ```
 
-### Phase 5: GHCR + GitHub Actions（Issue #8・任意）
-
-VM 上での Elixir コンパイルを避け、GitHub Actions でイメージをビルドして GHCR に publish する。
-
-ワークフロー: [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml)
-
-- `master` push で `ghcr.io/<owner>/dialup` に `latest` と commit SHA タグで publish
-- Coolify: ビルド pack を「Dockerfile ビルド」から「既存イメージ pull」に変更
-- GHCR 認証: GitHub PAT（`read:packages`）または Deploy Token を Coolify に設定
-
-```
-git push master → Actions build → GHCR push → Coolify pull & deploy
-```
-
-イメージ例: `ghcr.io/souichiroltsujimoto/dialup:latest`
-
 ### チェックリスト（Issue 対応表）
 
 | Issue | 完了条件 |
 |-------|----------|
 | #4 | Coolify ダッシュボードが VM 上で安定、LAN から管理 UI に到達可能 |
-| #5 | `master` push で自動デプロイ、VM 上でサイト表示 |
+| #5 | GHCR イメージで Coolify デプロイ、VM 上でサイト表示 |
 | #6 | `dialup-framework.org` が Coolify 先を指す、旧 app 停止後も稼働 |
 | #7 | 旧デプロイプロセスなし、本ドキュメントだけで再デプロイ可能 |
-| #8 | VM でコンパイルなしデプロイ、時間短縮 |
+| #8 | VM でコンパイルなし（Actions → GHCR → Coolify pull）、再デプロイ手順が明文化されている |
 | #9 | ランタイムイメージに build ツール・ソースなし、`bin/dialup_site start` で起動 |
