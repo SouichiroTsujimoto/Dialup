@@ -20,3 +20,5 @@ PORT=4001 mix run --no-halt
 ```bash
 docker compose up --build
 ```
+
+本番運用（Coolify + GHCR、Cloudflare Tunnel）は [Deployment ガイド](../guides/deployment.md#dialup-公式サイト本番運用dialup-frameworkorg) を参照。

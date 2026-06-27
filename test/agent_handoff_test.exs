@@ -78,9 +78,9 @@ defmodule Dialup.AgentHandoffTest do
         "arguments" => %{"_version" => 0}
       })
 
-    assert reset["error"]["code"] == -32_004
-    assert reset["error"]["message"] =~ "not supported via HTTP MCP"
-    assert reset["error"]["data"]["confirm"] == "human"
+    assert reset["result"]["isError"] == true
+    assert reset["result"]["structuredContent"]["confirm"] == "human"
+    assert hd(reset["result"]["content"])["text"] =~ "human confirmation"
   end
 
   test "navigation is a declared action, not a free-form navigate tool", %{token: token} do
@@ -113,7 +113,8 @@ defmodule Dialup.AgentHandoffTest do
     missing =
       rpc(token, 1, "tools/call", %{"name" => "navigate_missing", "arguments" => %{}})
 
-    assert missing["error"]["code"] == -32_602
+    assert missing["result"]["isError"] == true
+    assert missing["result"]["structuredContent"]["reason"] == "unknown_target"
   end
 
   test "navigation actions are gated by capability", %{pid: pid} do
@@ -142,21 +143,24 @@ defmodule Dialup.AgentHandoffTest do
     blocked =
       rpc(token, 2, "tools/call", %{"name" => "navigate_root", "arguments" => %{}})
 
-    assert blocked["error"]["code"] == -32_003
+    assert blocked["result"]["isError"] == true
+    assert blocked["result"]["structuredContent"]["reason"] == "unavailable"
   end
 
   test "confirm=human navigation is unsupported over HTTP MCP", %{token: token} do
     result =
       rpc(token, 1, "tools/call", %{"name" => "navigate_board_human", "arguments" => %{}})
 
-    assert result["error"]["code"] == -32_004
-    assert result["error"]["data"]["confirm"] == "human"
+    assert result["result"]["isError"] == true
+    assert result["result"]["structuredContent"]["confirm"] == "human"
   end
 
   test "navigate_action_name distinguishes hyphenated and nested paths" do
     assert Dialup.Page.navigate_action_name("/foo-bar") == :navigate_foo_bar
     assert Dialup.Page.navigate_action_name("/foo/bar") == :navigate_foo__bar
-    refute Dialup.Page.navigate_action_name("/foo-bar") == Dialup.Page.navigate_action_name("/foo/bar")
+
+    refute Dialup.Page.navigate_action_name("/foo-bar") ==
+             Dialup.Page.navigate_action_name("/foo/bar")
   end
 
   test "an agent can lock and unlock the human UI", %{pid: pid, token: token} do
@@ -248,6 +252,142 @@ defmodule Dialup.AgentHandoffTest do
     assert conn.status == 404
   end
 
+  test "the canonical /mcp endpoint authenticates with a bearer token", %{token: token} do
+    request =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "id" => 7,
+        "method" => "tools/call",
+        "params" => %{"name" => "read_scene", "arguments" => %{}}
+      })
+
+    conn =
+      Plug.Test.conn(:post, "/mcp", request)
+      |> Plug.Conn.put_req_header("authorization", "Bearer #{token}")
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    assert Jason.decode!(conn.resp_body)["id"] == 7
+  end
+
+  test "/mcp accepts a case-insensitive bearer auth scheme", %{token: token} do
+    request =
+      Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list", "params" => %{}})
+
+    conn =
+      Plug.Test.conn(:post, "/mcp", request)
+      |> Plug.Conn.put_req_header("authorization", "bearer  #{token}  ")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    assert is_list(Jason.decode!(conn.resp_body)["result"]["tools"])
+  end
+
+  test "/mcp accepts the token via the Mcp-Session-Id header", %{token: token} do
+    request =
+      Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list", "params" => %{}})
+
+    conn =
+      Plug.Test.conn(:post, "/mcp", request)
+      |> Plug.Conn.put_req_header("mcp-session-id", token)
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    assert is_list(Jason.decode!(conn.resp_body)["result"]["tools"])
+  end
+
+  test "/mcp without a token is unauthorized" do
+    request =
+      Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "tools/list", "params" => %{}})
+
+    conn =
+      Plug.Test.conn(:post, "/mcp", request)
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 401
+  end
+
+  test "GET on the MCP endpoint returns 405 (no SSE stream offered)", %{token: token} do
+    conn =
+      Plug.Test.conn(:get, "/mcp")
+      |> Plug.Conn.put_req_header("accept", "text/event-stream")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 405
+    assert Plug.Conn.get_resp_header(conn, "allow") == ["POST, DELETE"]
+
+    sse =
+      Plug.Test.conn(:get, "/agent/#{token}")
+      |> Plug.Conn.put_req_header("accept", "text/event-stream")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert sse.status == 405
+  end
+
+  test "initialize advertises the token as the Mcp-Session-Id", %{token: token} do
+    request =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "id" => 1,
+        "method" => "initialize",
+        "params" => %{"protocolVersion" => "2025-11-25", "capabilities" => %{}}
+      })
+
+    conn =
+      Plug.Test.conn(:post, "/agent/#{token}", request)
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    assert Plug.Conn.get_resp_header(conn, "mcp-session-id") == [token]
+    assert Plug.Conn.get_resp_header(conn, "mcp-protocol-version") == ["2025-11-25"]
+  end
+
+  test "an unsupported MCP-Protocol-Version header is rejected with 400", %{token: token} do
+    request =
+      Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => "ping"})
+
+    conn =
+      Plug.Test.conn(:post, "/agent/#{token}", request)
+      |> Plug.Conn.put_req_header("mcp-protocol-version", "1999-01-01")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 400
+  end
+
+  test "malformed JSON and batch bodies are rejected as JSON-RPC errors", %{token: token} do
+    parse =
+      Plug.Test.conn(:post, "/agent/#{token}", "{not json")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert parse.status == 400
+    assert Jason.decode!(parse.resp_body)["error"]["code"] == -32_700
+
+    batch =
+      Plug.Test.conn(
+        :post,
+        "/agent/#{token}",
+        Jason.encode!([%{"jsonrpc" => "2.0", "id" => 1, "method" => "ping"}])
+      )
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert batch.status == 400
+    assert Jason.decode!(batch.resp_body)["error"]["code"] == -32_600
+  end
+
+  test "JSON-RPC response bodies are accepted without a response", %{token: token} do
+    conn =
+      Plug.Test.conn(
+        :post,
+        "/agent/#{token}",
+        Jason.encode!(%{"jsonrpc" => "2.0", "id" => 99, "result" => %{}})
+      )
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 202
+    assert conn.resp_body == ""
+  end
+
   test "stale versions and invalid arguments are rejected", %{token: token} do
     stale =
       rpc(token, 1, "tools/call", %{
@@ -255,8 +395,9 @@ defmodule Dialup.AgentHandoffTest do
         "arguments" => %{"amount" => 1, "_version" => 99}
       })
 
-    assert stale["error"]["code"] == -32_009
-    assert stale["error"]["data"]["currentVersion"] == 0
+    assert stale["result"]["isError"] == true
+    assert stale["result"]["structuredContent"]["reason"] == "stale_version"
+    assert stale["result"]["structuredContent"]["currentVersion"] == 0
 
     invalid =
       rpc(token, 2, "tools/call", %{
@@ -264,7 +405,20 @@ defmodule Dialup.AgentHandoffTest do
         "arguments" => %{"amount" => "wrong", "_version" => 0}
       })
 
-    assert invalid["error"]["code"] == -32_602
+    assert invalid["result"]["isError"] == true
+    assert invalid["result"]["structuredContent"]["reason"] == "invalid_arguments"
+  end
+
+  test "non-object tool arguments are returned as tool errors", %{token: token} do
+    invalid =
+      rpc(token, 1, "tools/call", %{
+        "name" => "increment",
+        "arguments" => "not an object"
+      })
+
+    assert invalid["result"]["isError"] == true
+    assert invalid["result"]["structuredContent"]["reason"] == "invalid_arguments"
+    assert hd(invalid["result"]["structuredContent"]["errors"])["field"] == "arguments"
   end
 
   test "grants can be revoked", %{pid: pid, token: token} do
@@ -375,7 +529,7 @@ defmodule Dialup.AgentHandoffTest do
     assert conn.resp_body =~ "A shared counter operated by a human and an agent."
     assert conn.resp_body =~ ~s(rel="service-desc")
     assert conn.resp_body =~ ~s(href="/llms.txt")
-    assert conn.resp_body =~ "POST /agent/{token}"
+    assert conn.resp_body =~ "POST /mcp with a bearer token"
     refute conn.resp_body =~ ~s(style="display)
   end
 
@@ -388,9 +542,11 @@ defmodule Dialup.AgentHandoffTest do
 
     assert discovery["connection"]["status"] == "connected"
     assert discovery["connection"]["endpoint"] == "/agent/#{token}"
+    assert discovery["connection"]["mcpEndpoint"] == "/mcp"
     refute Map.has_key?(discovery["connection"], "websocket")
-    assert discovery["protocolGuide"]["transport"]["http"] =~ "/agent/#{token}"
-    assert discovery["protocolGuide"]["versioning"]["staleError"] == -32_009
+    assert discovery["protocolGuide"]["transport"]["http"] =~ "/mcp"
+    assert discovery["protocolGuide"]["transport"]["pathTokenHttp"] =~ "/agent/#{token}"
+    assert discovery["protocolGuide"]["versioning"]["staleResult"] =~ "isError"
     assert discovery["protocolGuide"]["versioning"]["recovery"] =~ "read_scene"
     assert discovery["protocolGuide"]["humanConfirmation"] =~ "confirm=human"
   end
@@ -407,6 +563,7 @@ defmodule Dialup.AgentHandoffTest do
              "A shared counter operated by a human and an agent."
 
     assert discovery["connection"]["status"] == "no_live_session"
+    assert discovery["connection"]["httpEndpoint"] == "/mcp"
     assert discovery["accessModel"]["pageUrl"] =~ "does not authenticate"
     assert discovery["accessModel"]["sessionToken"] =~ "/agent/"
     assert length(discovery["agentQuickstart"]["steps"]) >= 6

@@ -8,6 +8,10 @@ defmodule Dialup.Agent do
 
   alias Dialup.UserSessionProcess
   @protocol_version "2025-11-25"
+  @supported_protocol_versions ["2025-11-25", "2025-06-18", "2025-03-26"]
+
+  def protocol_version, do: @protocol_version
+  def supported_protocol_versions, do: @supported_protocol_versions
 
   def endpoint(token), do: "/agent/#{token}"
 
@@ -247,7 +251,8 @@ defmodule Dialup.Agent do
           "The ordinary page URL exposes the tool catalog but does not authenticate an agent " <>
             "to a live browser session.",
         "sessionToken" =>
-          "POST JSON-RPC to `/agent/{token}` with a bearer token issued for one live session.",
+          "POST JSON-RPC to `/mcp` with `Authorization: Bearer {token}` or " <>
+            "`Mcp-Session-Id: {token}`. `/agent/{token}` remains available as a path-token endpoint.",
         "tokenSources" => [
           "POST `/_dialup/agent-handoff?tab_id=...` from the user's open browser tab",
           "Server-side `Dialup.Session.grant/2` for programmatic access"
@@ -259,6 +264,7 @@ defmodule Dialup.Agent do
         "status" => "no_live_session",
         "instructions" =>
           "Obtain a session token, then POST JSON-RPC 2.0 to the HTTP MCP endpoint.",
+        "httpEndpoint" => "/mcp",
         "httpEndpointTemplate" => "/agent/{session-token}",
         "protocolVersion" => @protocol_version
       },
@@ -267,11 +273,12 @@ defmodule Dialup.Agent do
         "steps" => [
           "Fetch this discovery document for page concepts and the static tool catalog.",
           "Obtain a session bearer token for the target live session.",
-          "POST initialize to `/agent/{token}`.",
+          "POST initialize to `/mcp` with `Authorization: Bearer {token}`.",
           "POST tools/list to read generated tools from page declarations.",
           "POST tools/call read_scene to read the current semantic scene and version.",
           "POST tools/call for mutating actions with the latest `_version` in arguments.",
-          "On stale version errors (-32009), call read_scene and retry."
+          "On a stale version (an isError result carrying structuredContent.currentVersion), " <>
+            "call read_scene and retry with that version."
         ],
         "jsonRpcRequestShape" => %{
           "jsonrpc" => "2.0",
@@ -280,8 +287,8 @@ defmodule Dialup.Agent do
           "params" => %{"name" => "TOOL_NAME", "arguments" => %{}}
         },
         "humanConfirmation" =>
-          "Actions marked confirm=human are not executable via HTTP MCP. " <>
-            "They require the human browser UI."
+          "Actions marked confirm=human return an isError tool result over HTTP MCP " <>
+            "(structuredContent.confirm = \"human\"). They require the human browser UI."
       },
       "protocolGuide" => protocol_guide()
     }
@@ -295,11 +302,13 @@ defmodule Dialup.Agent do
       %{
         "status" => "connected",
         "endpoint" => endpoint(token),
+        "mcpEndpoint" => "/mcp",
         "stateVersion" => version,
         "grant" => Dialup.Agent.Grant.public(grant),
         "protocolVersion" => @protocol_version,
         "instructions" =>
-          "POST JSON-RPC 2.0 requests to endpoint with Content-Type: application/json."
+          "POST JSON-RPC 2.0 requests to /mcp with Content-Type: application/json " <>
+            "and the session token as Authorization: Bearer or Mcp-Session-Id."
       }
     )
     |> Map.put("protocolGuide", protocol_guide(token))
@@ -358,16 +367,19 @@ defmodule Dialup.Agent do
     end
   end
 
-  defp dispatch(_pid, _token, %{
-         "jsonrpc" => "2.0",
-         "method" => "initialize",
-         "params" => _params
-       }) do
+  defp dispatch(_pid, _token, %{"jsonrpc" => "2.0", "method" => "initialize"} = request) do
+    requested = get_in(request, ["params", "protocolVersion"])
+
+    negotiated =
+      if is_binary(requested) and requested in @supported_protocol_versions,
+        do: requested,
+        else: @protocol_version
+
     {:ok,
      %{
-       "protocolVersion" => @protocol_version,
+       "protocolVersion" => negotiated,
        "capabilities" => %{"tools" => %{"listChanged" => false}},
-       "serverInfo" => %{"name" => "dialup-session", "version" => "0.1.0"}
+       "serverInfo" => %{"name" => "dialup-session", "version" => "0.1.3"}
      }}
   end
 
@@ -389,42 +401,14 @@ defmodule Dialup.Agent do
        }) do
     arguments = Map.get(params, "arguments", %{})
 
-    case UserSessionProcess.agent_call(pid, token, name, arguments) do
-      {:ok, result} ->
-        {:ok,
-         %{
-           "content" => [%{"type" => "text", "text" => Jason.encode!(result)}],
-           "structuredContent" => result
-         }}
-
-      {:error, :unknown_action} ->
-        {:error, -32_601, "Unknown tool: #{name}"}
-
-      {:error, :unavailable} ->
-        {:error, -32_003, "Action is not available in the current state"}
-
-      {:error, :grant_expired} ->
-        {:error, -32_002, "Grant has expired or was revoked"}
-
-      {:error, :forbidden} ->
-        {:error, -32_003, "Grant does not allow this operation"}
-
-      {:error, :unknown_target} ->
-        {:error, -32_602, "Unknown or inaccessible semantic target"}
-
-      {:error, {:stale, current_version}} ->
-        {:error, -32_009, "State version is stale", %{"currentVersion" => current_version}}
-
-      {:error, {:invalid_arguments, errors}} ->
-        {:error, -32_602, "Invalid tool arguments", %{"errors" => errors}}
-
-      {:error, :human_confirmation_required} ->
-        {:error, -32_004,
-         "Action requires human confirmation and is not supported via HTTP MCP",
-         %{"confirm" => "human"}}
-
-      {:error, reason} ->
-        {:error, -32_000, Exception.format_exit(reason)}
+    if is_map(arguments) do
+      dispatch_tool_call(pid, token, name, arguments)
+    else
+      {:ok,
+       tool_error("Invalid tool arguments.", %{
+         "reason" => "invalid_arguments",
+         "errors" => [%{"field" => "arguments", "message" => "must be an object"}]
+       })}
     end
   end
 
@@ -433,6 +417,77 @@ defmodule Dialup.Agent do
   end
 
   defp dispatch(_pid, _token, _request), do: {:error, -32_600, "Invalid Request"}
+
+  defp dispatch_tool_call(pid, token, name, arguments) do
+    case UserSessionProcess.agent_call(pid, token, name, arguments) do
+      {:ok, result} ->
+        {:ok,
+         %{
+           "content" => [%{"type" => "text", "text" => Jason.encode!(result)}],
+           "structuredContent" => result,
+           "isError" => false
+         }}
+
+      # Protocol errors: the request itself is unanswerable. Unknown tool name and
+      # auth/session failures are surfaced as JSON-RPC errors, not tool results.
+      {:error, :unknown_action} ->
+        {:error, -32_602, "Unknown tool: #{name}"}
+
+      {:error, :grant_expired} ->
+        {:error, -32_002, "Grant has expired or was revoked"}
+
+      {:error, :forbidden} ->
+        {:error, -32_003, "Grant does not allow this operation"}
+
+      # Tool execution errors: reported inside the result with isError: true so the
+      # model receives actionable feedback and can self-correct (MCP tools spec).
+      {:error, :unavailable} ->
+        {:ok,
+         tool_error("Action is not available in the current state.", %{
+           "reason" => "unavailable"
+         })}
+
+      {:error, :unknown_target} ->
+        {:ok,
+         tool_error("Unknown or inaccessible semantic target.", %{
+           "reason" => "unknown_target"
+         })}
+
+      {:error, {:stale, current_version}} ->
+        {:ok,
+         tool_error(
+           "State version is stale. Call read_scene and retry with currentVersion " <>
+             "#{current_version}.",
+           %{"reason" => "stale_version", "currentVersion" => current_version}
+         )}
+
+      {:error, {:invalid_arguments, errors}} ->
+        {:ok,
+         tool_error("Invalid tool arguments.", %{
+           "reason" => "invalid_arguments",
+           "errors" => errors
+         })}
+
+      {:error, :human_confirmation_required} ->
+        {:ok,
+         tool_error(
+           "This action requires human confirmation and cannot be executed over HTTP MCP. " <>
+             "Use the human browser UI.",
+           %{"reason" => "human_confirmation_required", "confirm" => "human"}
+         )}
+
+      {:error, reason} ->
+        {:error, -32_603, "Internal error", %{"detail" => Exception.format_exit(reason)}}
+    end
+  end
+
+  defp tool_error(message, details) do
+    %{
+      "content" => [%{"type" => "text", "text" => message}],
+      "structuredContent" => details,
+      "isError" => true
+    }
+  end
 
   defp input_schema(params, require_version) do
     properties =
@@ -525,7 +580,9 @@ defmodule Dialup.Agent do
 
     %{
       "transport" => %{
-        "http" => "POST #{endpoint} with Content-Type: application/json"
+        "http" =>
+          "POST /mcp with Content-Type: application/json and Authorization: Bearer #{token}",
+        "pathTokenHttp" => "POST #{endpoint} with Content-Type: application/json"
       },
       "requests" => %{
         "initialize" => %{
@@ -553,15 +610,18 @@ defmodule Dialup.Agent do
       },
       "versioning" => %{
         "rule" => "Every mutating action must include the latest scene version as _version.",
-        "staleError" => -32_009,
+        "staleResult" =>
+          "A stale _version returns an isError tool result whose structuredContent.currentVersion " <>
+            "is the latest version.",
         "recovery" =>
-          "On stale error, do not retry blindly. Call read_scene, reconsider availability, " <>
+          "On a stale result, do not retry blindly. Call read_scene, reconsider availability, " <>
             "then issue a new action with the returned version."
       },
       "expiryRecovery" =>
         "If the session token expires or is revoked, obtain a fresh token from the live session.",
       "humanConfirmation" =>
-        "confirm=human actions return error -32004 over HTTP MCP. Use the human browser UI instead.",
+        "confirm=human actions return an isError tool result over HTTP MCP. " <>
+          "Use the human browser UI instead.",
       "navigation" =>
         "Navigation is exposed as ordinary actions whose _meta.navigate is the destination path " <>
           "(for example navigate_docs__concepts). Call one to open that page, just like a human " <>

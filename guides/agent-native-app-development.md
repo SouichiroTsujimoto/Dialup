@@ -78,14 +78,14 @@ end
 ```
 
 Capability URLs are bearer credentials. Mark irreversible operations with `confirm={:human}` —
-they return error `-32004` over HTTP MCP and must be performed in the human UI.
+they return an isError tool result over HTTP MCP and must be performed in the human UI.
 
 ## Runtime behavior an agent must understand
 
 - `read_scene` returns `state`, `regions`, `actions`, and `version` (subject to grant projections).
 - Mutations require `_version` unless the grant sets `require_version: false`.
-- Stale mutations fail with JSON-RPC error `-32009`.
-- `confirm: :human` is not executable via HTTP MCP.
+- Stale mutations return an isError tool result whose `structuredContent.currentVersion` is the latest.
+- `confirm: :human` is not executable via HTTP MCP (it returns an isError tool result).
 - `read_audit_log` exposes the ordered human/agent activity log when granted.
 - Agents use HTTP only — there is no agent WebSocket transport.
 

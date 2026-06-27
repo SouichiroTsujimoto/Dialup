@@ -5,6 +5,7 @@ When implementing a Dialup application, read these in order:
 1. `guides/agent-native-app-development.md`
 2. `guides/mcp-api.md`
 3. `guides/agent-handoff.md` (session tokens)
+4. `guides/agent-pitfalls.md` (common agent misunderstandings — check before adding page-specific CSS or ws-change handlers)
 
 Treat the page's server-side session as the single source of truth. Do not create a
 separate agent API or duplicate business logic. UI declarations become HTTP MCP tools.
@@ -25,3 +26,13 @@ For agent-enabled pages:
 
 Agents connect via `POST /agent/:token` (JSON-RPC). There is no agent WebSocket transport.
 Obtain a session token programmatically or through `POST /_dialup/agent-handoff`.
+
+## Framework release (maintainers)
+
+When publishing a new `:dialup` version to Hex, use the **publish-new-version** skill
+(`.cursor/skills/publish-new-version/SKILL.md`). It requires pre-publish verification of:
+
+1. **mix docs** — `mix.exs` extras, `lib/` moduledocs, and `guides/` match the framework
+2. **dialup-site** — `site/lib/app/docs/` pages match the framework (separate source from guides)
+
+Do not run `mix hex.publish` until both gates pass and validation commands succeed.

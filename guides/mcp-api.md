@@ -88,12 +88,25 @@ To operate a user's **live** browser session, obtain a bearer token:
 1. **Programmatic** — `Dialup.Session.grant(session_pid, opts)`
 2. **From the open tab** — `POST /_dialup/agent-handoff?tab_id=...` (uses the tab's registry key)
 
-Then call:
+Then call the MCP endpoint. There are two equivalent ways to present the token:
+
+```
+POST /mcp
+Authorization: Bearer {token}
+Content-Type: application/json
+```
 
 ```
 POST /agent/{token}
 Content-Type: application/json
 ```
+
+`POST /mcp` is the canonical [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+endpoint for off-the-shelf MCP clients: configure the client with the `/mcp` URL and a bearer
+token (the `Mcp-Session-Id` header is also accepted). `POST /agent/{token}` is the same handler with
+the token in the path. On `initialize`, the server returns the token as the `Mcp-Session-Id`
+response header, which a standard client echoes on subsequent requests. A `GET` to either endpoint
+returns `405` because no server-initiated SSE stream is offered — agents poll with `read_scene`.
 
 ## MCP lifecycle
 
@@ -125,13 +138,28 @@ Supported JSON-RPC methods:
 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"add_item","arguments":{"sku":"AI-1","qty":2,"_version":3}}}
 ```
 
-Every mutating action should include the latest `_version` from `read_scene`. Stale calls return
-error `-32009` with `currentVersion` — call `read_scene` again instead of blind retries.
+Every mutating action should include the latest `_version` from `read_scene`. A stale `_version`
+returns an **isError tool result** whose `structuredContent.currentVersion` is the latest version —
+call `read_scene` again instead of blind retries.
+
+### Error model
+
+Following the MCP [tools spec](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#error-handling),
+errors fall into two buckets:
+
+- **Protocol errors** (JSON-RPC `error`) — unknown tool (`-32602`), session/grant problems
+  (`-32002`/`-32003`), parse/invalid request (`-32700`/`-32600`). The request itself is
+  unanswerable.
+- **Tool execution errors** (a normal result with `"isError": true`) — stale `_version`,
+  invalid arguments, unavailable action, unknown semantic target, and `confirm: :human`. These carry
+  a human-readable `content` message plus a `structuredContent.reason` so the model can self-correct
+  and retry.
 
 ## Human-only actions
 
-Actions marked `confirm: :human` are **not** executable over HTTP MCP. They return error `-32004`.
-Use the human browser UI for those operations.
+Actions marked `confirm: :human` are **not** executable over HTTP MCP. The call returns an
+**isError tool result** (`structuredContent.confirm = "human"`). Use the human browser UI for those
+operations.
 
 ## Navigating between pages
 

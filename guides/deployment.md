@@ -113,7 +113,37 @@ sudo systemctl status my_app
 
 ## Docker
 
-### Dockerfile
+Dialup 公式サイト（`site/`）はリポジトリルートの
+[`Dockerfile`](https://github.com/SouichiroTsujimoto/Dialup/blob/master/Dockerfile)
+で `mix release` ベースのマルチステージイメージをビルドする。
+
+```bash
+docker build -t dialup-site .
+docker run -p 4001:4001 -e PORT=4001 dialup-site
+```
+
+ローカル検証は `docker compose up -d --build` でも可能（[`docker-compose.yml`](../docker-compose.yml)）。
+
+ランタイムイメージには OTP release のみが含まれ、`bin/dialup_site start` で起動する。
+
+### Dockerfile（mix release・マルチステージ）
+
+```dockerfile
+# build ステージ: モノレポ全体をコピーし site/ で mix release
+FROM elixir:1.19-alpine AS build
+# ... framework + site ソース ...
+RUN mix release
+
+# runtime ステージ: release のみ（build ツール・ソースなし）
+FROM alpine:3.23 AS runtime
+RUN apk add --no-cache libstdc++ openssl ncurses-libs
+COPY --from=build /build/site/_build/prod/rel/dialup_site ./
+CMD ["bin/dialup_site", "start"]
+```
+
+`site/mix.exs` の path 依存 `{:dialup, path: ".."}` はビルドステージでモノレポレイアウトを維持することで release に同梱される。
+
+### 旧: 開発向け単一ステージ（非推奨）
 
 ```dockerfile
 FROM hexpm/elixir:1.19-erlang-26-alpine-3.18
@@ -265,3 +295,152 @@ priv/static/
 - **WebSocket**: ロードバランサーがWebSocketをサポートしているか確認（`Upgrade`ヘッダーの転送が必要）
 - **ファイルアップロード**: `/tmp` など一時ディレクトリの書き込み権限が必要
 - **セッション永続化**: `session_store: :ets` はノード再起動で消える。永続化が必要な場合は外部ストアの検討を
+
+## Dialup 公式サイト本番運用（dialup-framework.org）
+
+モノレポ（`site/` + ルート `Dockerfile`）を UGREEN NAS 上の Coolify VM でホストし、Cloudflare Tunnel で公開する。
+
+**現行構成:** Coolify の GitHub 連携（Deploy Key / GitHub App）は環境上うまく動かなかったため、**GitHub Actions → GHCR → Coolify（イメージ pull）** でデプロイする。VM 上での Elixir コンパイルは行わない。
+
+### アーキテクチャ
+
+```
+GitHub (master push)
+    │
+    └─► GitHub Actions ──► ghcr.io/<owner>/dialup:latest
+              │
+              └─► Coolify (UGREEN NAS VM) ──► dialup_site :4001
+                        ▲
+          cloudflared (docker-compose.tunnel.yml)
+                        │
+               Cloudflare Tunnel
+                        │
+          https://dialup-framework.org
+```
+
+GitHub Actions が `master` push のたびに GHCR へイメージを publish する。Coolify は GHCR から pull してコンテナを起動する。Coolify 側に GitHub webhook はないため、**GHCR への push 後は Coolify 管理 UI から手動で再デプロイ**する（下記「再デプロイ」参照）。
+
+### Phase 1: Coolify VM セットアップ（Issue #4）
+
+UGREEN NAS で VM を作成し、Coolify をインストールする。NAS 本体への直載せではなく **VM 上に構築**する。
+
+| 項目 | 推奨値 |
+|------|--------|
+| RAM | 3〜4 GB |
+| ディスク | 20 GB 以上 |
+| OS | Ubuntu 22.04 / 24.04 LTS |
+| ネットワーク | ブリッジ（同一 LAN から管理 UI に到達可能） |
+
+VM に SSH したうえで、リポジトリ付属スクリプトを実行できる:
+
+```bash
+git clone https://github.com/SouichiroTsujimoto/Dialup.git
+cd Dialup
+./scripts/vm-setup-coolify.sh
+```
+
+手動で行う場合:
+
+1. [Coolify 公式インストール](https://coolify.io/docs/get-started/installation)に従い Docker + Coolify をセットアップ
+2. 同一 LAN から Coolify 管理 UI にアクセスできることを確認
+3. **VM スナップショットを取得**（ロールバック用）
+
+### Phase 2: Coolify + GHCR で site/ をデプロイ（Issue #5 / #8）
+
+GitHub Actions でイメージをビルドし GHCR に publish する。Coolify はリポジトリを clone して Dockerfile ビルドするのではなく、**既存イメージ pull** でデプロイする。
+
+ワークフロー: [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml)
+
+- `master` push（および `workflow_dispatch`）で `ghcr.io/<owner>/dialup` に `latest` と commit SHA タグで publish
+- イメージ例: `ghcr.io/souichirotsujimoto/dialup:latest`
+
+#### Coolify アプリ設定
+
+| 項目 | 値 |
+|------|-----|
+| デプロイ方式 | **Docker Image**（既存イメージ pull） |
+| Image | `ghcr.io/souichirotsujimoto/dialup:latest` |
+| Port | `4001` |
+| 環境変数 | `PORT=4001`, `MIX_ENV=prod` |
+| GHCR 認証 | GitHub PAT（`read:packages`）または Deploy Token |
+
+GitHub 連携（Deploy Key / GitHub App）と Auto Deploy は**使わない**。Coolify からリポジトリへ直接アクセスする必要がない。
+
+#### 初回セットアップ手順
+
+1. `master` に merge し、[Actions の Docker Publish](https://github.com/SouichiroTsujimoto/Dialup/actions/workflows/docker-publish.yml) が成功し GHCR にイメージがあることを確認
+2. Coolify に上記のとおり Docker Image アプリを登録し、GHCR 認証を設定
+3. 手動デプロイで pull・起動を確認
+4. VM 内から `http://127.0.0.1:4001` で agent demo / docs ページを表示確認
+
+#### 再デプロイ
+
+`master` への merge だけでは Coolify 上のコンテナは自動更新されない。
+
+1. `master` に merge（または [workflow_dispatch](https://github.com/SouichiroTsujimoto/Dialup/actions/workflows/docker-publish.yml) で手動実行）
+2. GitHub Actions の **Docker Publish** が完了するまで待つ
+3. Coolify 管理 UI で対象アプリの **Redeploy**（または **Pull latest image & restart**）を実行
+
+特定コミットを pin したい場合は、Coolify の Image タグを SHA タグ（例: `ghcr.io/souichirotsujimoto/dialup:abc1234`）に変更してからデプロイする。
+
+#### 代替: Coolify GitHub 連携 + Dockerfile ビルド（未採用）
+
+Coolify の GitHub 連携を有効にし、リポジトリから Dockerfile をビルドする方式も想定していたが、本番 VM では連携が確立できなかった。NAS RAM 7.5 GB・VM 3〜4 GB 割当では VM 上での Elixir コンパイルは OOM や極端な遅延のリスクもあり、GHCR 経由を採用している。
+
+### Phase 3: Cloudflare Tunnel 切替（Issue #6）
+
+Coolify 上のアプリが VM 内で安定稼働していることを確認してから、トンネルの向き先を切り替える。
+
+リポジトリにはアプリとトンネルを分離済み:
+
+- アプリ: [`docker-compose.yml`](../docker-compose.yml)（ローカル検証用）
+- トンネル: [`docker-compose.tunnel.yml`](../docker-compose.tunnel.yml)（`network_mode: host`）
+
+**推奨: VM 上で `docker-compose.tunnel.yml` を別管理**（Coolify アプリネットワークと疎結合）。
+
+1. Cloudflare Zero Trust でトンネルのパブリックホスト名を `http://127.0.0.1:4001` に設定
+2. VM 上でトンネル起動:
+
+```bash
+export CLOUDFLARE_TUNNEL_TOKEN="<token>"
+./scripts/start-cloudflare-tunnel.sh
+```
+
+3. 本番確認:
+   - `https://dialup-framework.org` の表示
+   - WebSocket `/ws`
+   - agent MCP `POST /agent/:token`
+4. **旧 NAS compose の app コンテナを停止**してもサイトが稼働することを確認
+
+#### ロールバック
+
+- 旧 compose は **1 週間は停止のみ**（削除しない）で保持
+- Cloudflare トンネル設定のスクリーンショット / メモを残す
+
+### Phase 4: 旧構成撤去（Issue #7）
+
+トンネル切替完了後:
+
+1. NAS 上の旧 2 リポジトリ clone / 旧 compose プロセスを停止
+2. 1 週間経過後: 旧 compose ファイル・`.env` を削除
+3. ローカルに旧 `dialup_site/` ディレクトリが残っていれば削除（任意）
+
+ローカル再現手順:
+
+```bash
+git clone https://github.com/SouichiroTsujimoto/Dialup.git
+cd Dialup
+docker compose up -d --build
+# トンネルは docker-compose.tunnel.yml で別管理
+```
+
+### チェックリスト（Issue 対応表）
+
+| Issue | 完了条件 |
+|-------|----------|
+| #4 | Coolify ダッシュボードが VM 上で安定、LAN から管理 UI に到達可能 |
+| #5 | GHCR イメージで Coolify デプロイ、VM 上でサイト表示 |
+| #6 | `dialup-framework.org` が Coolify 先を指す、旧 app 停止後も稼働 |
+| #7 | 旧デプロイプロセスなし、本ドキュメントだけで再デプロイ可能 |
+| #8 | VM でコンパイルなし（Actions → GHCR → Coolify pull）、再デプロイ手順が明文化されている |
+| #9 | ランタイムイメージに build ツール・ソースなし、`bin/dialup_site start` で起動 |

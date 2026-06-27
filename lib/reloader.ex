@@ -67,6 +67,7 @@ defmodule Dialup.Reloader do
   defp fix_future_mtimes(mtimes) do
     now = :calendar.universal_time()
     past = then(now, fn {{y, m, d}, {h, min, s}} -> {{y, m, d}, {h, min, max(s - 1, 0)}} end)
+
     Enum.each(mtimes, fn {path, mtime} ->
       if mtime > now, do: File.touch!(path, past)
     end)

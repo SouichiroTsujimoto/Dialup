@@ -73,7 +73,10 @@ defmodule Mix.Tasks.Dialup.New do
       """)
     end
 
-    app = opts[:app] || Path.basename(target_dir) |> String.downcase() |> String.replace(~r/[^a-z0-9_]/, "_")
+    app =
+      opts[:app] ||
+        Path.basename(target_dir) |> String.downcase() |> String.replace(~r/[^a-z0-9_]/, "_")
+
     mod = opts[:module] || Macro.camelize(app)
 
     bindings = [

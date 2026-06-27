@@ -11,7 +11,9 @@ defmodule Dialup.AgentHandoffTest.App do
   def layouts_for("/board"), do: [Layout]
   def layouts_for(_path), do: []
   def error_page_for(_path), do: nil
-  def dispatch("/", assigns), do: {:ok, Dialup.Router.render_with_layouts(Page, [Layout], assigns)}
+
+  def dispatch("/", assigns),
+    do: {:ok, Dialup.Router.render_with_layouts(Page, [Layout], assigns)}
 
   def dispatch("/board", assigns),
     do: {:ok, Dialup.Router.render_with_layouts(BoardPage, [Layout], assigns)}

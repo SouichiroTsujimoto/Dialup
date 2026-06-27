@@ -32,3 +32,19 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t dialup-site .
+
+      - name: Smoke test container
+        run: |
+          docker run -d --name dialup-site-ci -p 4001:4001 -e PORT=4001 dialup-site
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4001/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs dialup-site-ci
+          exit 1
+
+      - name: Stop smoke test container
+        if: always()
+        run: docker rm -f dialup-site-ci 2>/dev/null || true

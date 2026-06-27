@@ -44,7 +44,14 @@ defmodule Dialup.Telemetry do
 
   @doc "handle_event 処理中の例外を記録する。"
   def event_exception(start_time, event_name, path, kind, reason, stacktrace) do
-    metadata = %{event: event_name, path: path, kind: kind, reason: reason, stacktrace: stacktrace}
+    metadata = %{
+      event: event_name,
+      path: path,
+      kind: kind,
+      reason: reason,
+      stacktrace: stacktrace
+    }
+
     duration = System.monotonic_time() - start_time
     :telemetry.execute([:dialup, :event, :exception], %{duration: duration}, metadata)
   end
@@ -53,7 +60,13 @@ defmodule Dialup.Telemetry do
   def navigate_start(path) do
     metadata = %{path: path}
     start_time = System.monotonic_time()
-    :telemetry.execute([:dialup, :navigate, :start], %{system_time: System.system_time()}, metadata)
+
+    :telemetry.execute(
+      [:dialup, :navigate, :start],
+      %{system_time: System.system_time()},
+      metadata
+    )
+
     start_time
   end
 
