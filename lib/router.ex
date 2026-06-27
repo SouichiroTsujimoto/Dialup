@@ -218,8 +218,11 @@ defmodule Dialup.Router do
         case Map.get(@static_routes, clean_path) do
           nil ->
             case match_dynamic_route(clean_path) do
-              nil -> {:error, :not_found}
-              {_, info} -> {:ok, Dialup.Router.render_with_layouts(info.page, info.layouts, assigns)}
+              nil ->
+                {:error, :not_found}
+
+              {_, info} ->
+                {:ok, Dialup.Router.render_with_layouts(info.page, info.layouts, assigns)}
             end
 
           %{page: page_mod, layouts: layouts} ->

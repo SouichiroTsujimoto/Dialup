@@ -7,9 +7,9 @@ defmodule Dialup.App.Docs.Api.Page do
 
   def agent_message(_assigns) do
     %{
-      concept:
-        "API reference documentation for Dialup. Read-only page with no mutable state.",
-      goal: "Look up use Dialup options, handle_event return values, HTML attributes, and helpers."
+      concept: "API reference documentation for Dialup. Read-only page with no mutable state.",
+      goal:
+        "Look up use Dialup options, handle_event return values, HTML attributes, and helpers."
     }
   end
 
@@ -36,7 +36,8 @@ defmodule Dialup.App.Docs.Api.Page do
         title: "My App",              # <title> のデフォルト値
         lang: "en",                   # html lang 属性
         check_origin: :conn,          # WebSocket オリジン検証
-        plugs: [MyApp.AuthPlug]       # カスタム Plug（省略可）
+        plugs: [MyApp.AuthPlug],      # カスタム Plug（省略可）
+        session_store: :memory        # :memory / :ets
 
       @impl Application
       def start(_type, _args) do
@@ -187,6 +188,46 @@ defmodule Dialup.App.Docs.Api.Page do
     """
   end
 
+  defp code_agent_actions do
+    action = "dialup_action"
+    region = "dialup_region"
+
+    """
+    defmodule Dialup.App.Invoice.Page do
+      use Dialup.Page
+
+      declare_action name: :add_item,
+                     desc: "明細を追加する",
+                     params: %{sku: :string, qty: {:integer, default: 1}}
+
+      declare_region name: :items,
+                     role: "list",
+                     desc: "請求書の明細",
+                     data: :items
+
+      def mount(_params, assigns), do: {:ok, Map.put(assigns, :items, [])}
+      def agent_state(assigns), do: %{items: assigns.items}
+
+      def __available__(:add_item, _assigns), do: true
+
+      def handle_event(:add_item, params, assigns) do
+        item = %{sku: params["sku"], qty: params["qty"]}
+        {:update, Map.update!(assigns, :items, &(&1 ++ [item]))}
+      end
+
+      def render(assigns) do
+        ~H\"""
+        <.#{region} name={:items} role="list" desc="請求書の明細">
+          <ul><li :for={item <- @items}>{item.sku} x {item.qty}</li></ul>
+        </.#{region}>
+
+        <.#{action} name={:add_item} sku="SKU-1" qty="1">追加</.#{action}>
+        \"""
+      end
+    end
+    """
+  end
+
   # ── render ───────────────────────────────────────────────────────────────
 
   def render(assigns) do
@@ -227,6 +268,10 @@ defmodule Dialup.App.Docs.Api.Page do
         <tr>
           <td><code>plugs</code></td>
           <td>カスタム Plug パイプライン（認証・CORS など）</td>
+        </tr>
+        <tr>
+          <td><code>session_store</code></td>
+          <td>セッション状態の保存先。<code>:memory</code>（デフォルト）または <code>:ets</code></td>
         </tr>
       </tbody>
     </table>
@@ -333,6 +378,16 @@ defmodule Dialup.App.Docs.Api.Page do
         <tr><td>用途</td><td>トースト・モーダル・スクロールなど一発イベント</td><td>地図・チャート・リッチエディタなど初期化が必要なもの</td></tr>
       </tbody>
     </table>
+
+    <h2>HTTP MCP tools</h2>
+    <p>
+      エージェントに公開する操作は、通常の <code>ws-event</code> ではなく
+      <code>&lt;.dialup_action&gt;</code> または <code>declare_action/1</code> で宣言します。
+      実装は人間の UI と同じ <code>handle_event/3</code> に置きます。
+      ナビゲーションも <code>&lt;.dialup_action navigate="/path"&gt;</code> として宣言したリンクだけが tool になります。
+      意味のある領域は <code>&lt;.dialup_region&gt;</code> / <code>declare_region/1</code> で安定した名前を与えます。
+    </p>
+    <pre><code>{code_agent_actions()}</code></pre>
 
     <h2>ページモジュールのオプション</h2>
 

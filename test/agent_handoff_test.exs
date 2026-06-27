@@ -158,7 +158,9 @@ defmodule Dialup.AgentHandoffTest do
   test "navigate_action_name distinguishes hyphenated and nested paths" do
     assert Dialup.Page.navigate_action_name("/foo-bar") == :navigate_foo_bar
     assert Dialup.Page.navigate_action_name("/foo/bar") == :navigate_foo__bar
-    refute Dialup.Page.navigate_action_name("/foo-bar") == Dialup.Page.navigate_action_name("/foo/bar")
+
+    refute Dialup.Page.navigate_action_name("/foo-bar") ==
+             Dialup.Page.navigate_action_name("/foo/bar")
   end
 
   test "an agent can lock and unlock the human UI", %{pid: pid, token: token} do

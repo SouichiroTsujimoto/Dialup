@@ -106,7 +106,7 @@ end|
 end|
 
   defp code_mcp_arch, do: ~S|【人間】 dialup.js ──WebSocket──► UserSessionProcess
-【AI】   POST /agent/:token (JSON-RPC) ──► 同じ UserSessionProcess
+【AI】   POST /mcp (Bearer token) または /agent/:token ──► 同じ UserSessionProcess
                 │
          declare_action / dialup_action
                 │
@@ -216,10 +216,12 @@ end|
 
     <h2>HTTP MCP API（UI から自動生成）</h2>
     <p>
-      Dialup のもう一つの中心軸は、人間向け UI 宣言からエージェント向け HTTP JSON-RPC API を
+      Dialup のもう一つの中心軸は、人間向け UI 宣言からエージェント向け HTTP MCP API を
       自動生成することです。<code>&lt;.dialup_action&gt;</code> と <code>declare_action/1</code> が
       <code>tools/list</code> のカタログになり、<code>tools/call</code> は同じ
       <code>handle_event/3</code> に直列化されます。
+      標準 MCP クライアントには <code>POST /mcp</code> と bearer token を使い、
+      <code>POST /agent/:token</code> は同じハンドラへ届く path-token 形式です。
     </p>
     <pre class="arch-diagram">{code_mcp_arch()}</pre>
     <p>

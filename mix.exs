@@ -4,7 +4,7 @@ defmodule Dialup.MixProject do
   def project do
     [
       app: :dialup,
-      version: "0.1.2",
+      version: "0.1.3",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -17,10 +17,11 @@ defmodule Dialup.MixProject do
       source_url: "https://github.com/SouichiroTsujimoto/Dialup",
       homepage_url: "https://dialup-framework.org",
       docs: [
-        main: "readme",
+        main: "readme-1",
         extras: [
           "README.md",
           "README.ja.md",
+          "guides/README.md",
           "guides/getting-started.md",
           "guides/fullstack-example.md",
           "guides/routing.md",
@@ -30,16 +31,19 @@ defmodule Dialup.MixProject do
           "guides/agent-native-app-development.md",
           "guides/mcp-api.md",
           "guides/agent-handoff.md",
+          "guides/agent-pitfalls.md",
+          "guides/file-upload.md",
           "guides/helpers.md",
           "guides/testing.md",
           "guides/telemetry.md",
           "guides/deployment.md"
         ],
         groups_for_extras: [
-          Guides: ~w(guides/getting-started.md guides/routing.md guides/state-management.md
-                     guides/lifecycle.md guides/events.md guides/agent-native-app-development.md
-                     guides/mcp-api.md guides/agent-handoff.md guides/helpers.md
-                     guides/testing.md guides/telemetry.md guides/deployment.md)
+          Guides: ~w(guides/README.md guides/getting-started.md guides/fullstack-example.md
+                     guides/routing.md guides/state-management.md guides/lifecycle.md guides/events.md
+                     guides/agent-native-app-development.md guides/mcp-api.md guides/agent-handoff.md
+                     guides/agent-pitfalls.md guides/file-upload.md guides/helpers.md guides/testing.md
+                     guides/telemetry.md guides/deployment.md)
         ]
       ]
     ]
@@ -80,8 +84,7 @@ defmodule Dialup.MixProject do
         "Website" => "https://dialup-framework.org",
         "GitHub" => "https://github.com/SouichiroTsujimoto/Dialup"
       },
-      files:
-        ~w(lib priv guides AGENTS.md mix.exs README.md README.ja.md LICENSE)
+      files: ~w(lib priv guides AGENTS.md mix.exs README.md README.ja.md LICENSE)
     ]
   end
 end

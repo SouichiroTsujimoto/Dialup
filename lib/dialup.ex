@@ -73,10 +73,10 @@ defmodule Dialup do
       use Dialup.Router, app_dir: unquote(app_dir)
 
       # app_dir は __DIR__ <> "/app" のため quote 内で評価（ユーザモジュールのコンパイル時に __DIR__ が展開される）
-      @_dialup_static_dir (unquote(app_dir)
-                           |> Path.dirname()
-                           |> Path.dirname()
-                           |> Path.join("priv/static"))
+      @_dialup_static_dir unquote(app_dir)
+                          |> Path.dirname()
+                          |> Path.dirname()
+                          |> Path.join("priv/static")
 
       for f <- ~w[dialup.js idiomorph.js] do
         if File.exists?(Path.join(@_dialup_static_dir, f)) do
@@ -87,7 +87,7 @@ defmodule Dialup do
         end
       end
 
-      @_dialup_shell_path (unquote(app_dir) |> Path.dirname() |> Path.join("root.html.heex"))
+      @_dialup_shell_path unquote(app_dir) |> Path.dirname() |> Path.join("root.html.heex")
       @external_resource @_dialup_shell_path
       @before_compile Dialup.Shell
 

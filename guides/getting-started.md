@@ -29,7 +29,7 @@ mix deps.get
 ```
 my_app/
 ├── README.md
-├── mix.exs              # {:dialup, "~> 0.1.0"} を含む
+├── mix.exs              # {:dialup, "~> 0.1.3"} を含む
 ├── .gitignore
 ├── priv/static/         # 静的ファイル置き場（画像・フォント・favicon など）
 └── lib/
@@ -78,7 +78,7 @@ mix run --no-halt
 ```elixir
 defp deps do
   [
-    {:dialup, "~> 0.1.0"}
+    {:dialup, "~> 0.1.3"}
   ]
 end
 ```

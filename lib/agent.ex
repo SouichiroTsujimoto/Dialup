@@ -379,7 +379,7 @@ defmodule Dialup.Agent do
      %{
        "protocolVersion" => negotiated,
        "capabilities" => %{"tools" => %{"listChanged" => false}},
-       "serverInfo" => %{"name" => "dialup-session", "version" => "0.1.0"}
+       "serverInfo" => %{"name" => "dialup-session", "version" => "0.1.3"}
      }}
   end
 
@@ -411,6 +411,12 @@ defmodule Dialup.Agent do
        })}
     end
   end
+
+  defp dispatch(_pid, _token, %{"jsonrpc" => "2.0"}) do
+    {:error, -32_601, "Method not found"}
+  end
+
+  defp dispatch(_pid, _token, _request), do: {:error, -32_600, "Invalid Request"}
 
   defp dispatch_tool_call(pid, token, name, arguments) do
     case UserSessionProcess.agent_call(pid, token, name, arguments) do
@@ -474,12 +480,6 @@ defmodule Dialup.Agent do
         {:error, -32_603, "Internal error", %{"detail" => Exception.format_exit(reason)}}
     end
   end
-
-  defp dispatch(_pid, _token, %{"jsonrpc" => "2.0"}) do
-    {:error, -32_601, "Method not found"}
-  end
-
-  defp dispatch(_pid, _token, _request), do: {:error, -32_600, "Invalid Request"}
 
   defp tool_error(message, details) do
     %{

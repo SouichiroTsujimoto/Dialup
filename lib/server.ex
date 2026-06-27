@@ -144,7 +144,9 @@ defmodule Dialup.Server do
   end
 
   get "/agent/:token/ws" do
-    send_json(conn, 404, %{"error" => "Agent WebSocket transport is not supported. Use HTTP JSON-RPC."})
+    send_json(conn, 404, %{
+      "error" => "Agent WebSocket transport is not supported. Use HTTP JSON-RPC."
+    })
   end
 
   # Canonical MCP endpoint for standard Streamable HTTP clients. The session token is
@@ -444,7 +446,8 @@ defmodule Dialup.Server do
       [scheme, token] ->
         if String.downcase(scheme) == "bearer", do: normalize_token(token), else: nil
 
-      _ -> nil
+      _ ->
+        nil
     end
   end
 

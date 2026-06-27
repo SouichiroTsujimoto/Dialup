@@ -113,7 +113,9 @@ sudo systemctl status my_app
 
 ## Docker
 
-Dialup 公式サイト（`site/`）はリポジトリルートの [`Dockerfile`](../Dockerfile) で `mix release` ベースのマルチステージイメージをビルドする。
+Dialup 公式サイト（`site/`）はリポジトリルートの
+[`Dockerfile`](https://github.com/SouichiroTsujimoto/Dialup/blob/master/Dockerfile)
+で `mix release` ベースのマルチステージイメージをビルドする。
 
 ```bash
 docker build -t dialup-site .
