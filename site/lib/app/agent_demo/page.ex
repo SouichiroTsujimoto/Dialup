@@ -30,16 +30,7 @@ defmodule Dialup.App.AgentDemo.Page do
 
   def page_title(_assigns), do: "AIにバトンタッチ — Dialup MCP Demo"
 
-  def mount(_params, assigns) do
-    {:ok,
-     assigns
-     |> Map.merge(%{
-       project: "社内勉強会の企画",
-       tasks: [],
-       next_id: 1,
-       handoff: nil
-     })}
-  end
+  def mount(_params, assigns), do: {:ok, assigns}
 
   def agent_state(assigns) do
     %{

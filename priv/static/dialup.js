@@ -8,7 +8,36 @@ const Dialup = (() => {
     let hooks = {};
     const debounceTimers = new WeakMap();
 
-    const tabId = crypto.randomUUID();
+    function loadTabId() {
+        const key = "dialup_tab_id";
+
+        try {
+            let id = sessionStorage.getItem(key);
+
+            if (!id) {
+                id = crypto.randomUUID();
+                sessionStorage.setItem(key, id);
+            }
+
+            return id;
+        } catch {
+            return crypto.randomUUID();
+        }
+    }
+
+    const tabId = loadTabId();
+    let joinToken = new URLSearchParams(window.location.search).get("_join");
+    let joinRetryCount = 0;
+    const maxJoinRetries = 3;
+
+    function clearJoinFromUrl() {
+        joinToken = null;
+        joinRetryCount = 0;
+        const clean = new URL(location.href);
+        if (!clean.searchParams.has("_join")) return;
+        clean.searchParams.delete("_join");
+        history.replaceState({ path: currentPath }, "", clean.pathname + clean.search);
+    }
 
     function send(event, value) {
         if (socket && socket.readyState === WebSocket.OPEN) {
@@ -199,18 +228,55 @@ const Dialup = (() => {
         if (el) el.dataset.wsState = connected ? "connected" : "disconnected";
     }
 
+    function showJoinFailure() {
+        setConnectionState(false);
+        const el = document.getElementById("ws-status");
+        if (el) {
+            el.dataset.wsState = "join-failed";
+            el.textContent = "Could not join the live session. Request a new link from the agent.";
+        }
+    }
+
+    async function finalizeBrowserJoin(nonce) {
+        const params = new URLSearchParams({
+            tab_id: tabId,
+            nonce,
+        });
+
+        const response = await fetch(`/_dialup/finalize-join?${params.toString()}`, {
+            method: "POST",
+            credentials: "same-origin",
+        });
+
+        if (!response.ok) {
+            throw new Error("browser join finalize failed");
+        }
+    }
+
     function connectSocket(opts = {}) {
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        const url = `${proto}//${location.host}/ws?tab_id=${encodeURIComponent(tabId)}`;
+        const tokenForThisConnection = joinToken;
+        let awaitingJoinFinalize = false;
+        let joinFinalizePromise = null;
+
+        let url = `${proto}//${location.host}/ws?tab_id=${encodeURIComponent(tabId)}`;
+        if (tokenForThisConnection) {
+            url += `&join_token=${encodeURIComponent(tokenForThisConnection)}`;
+        }
 
         socket = new WebSocket(url);
+        let joinOpened = false;
 
         socket.onopen = () => {
             if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
             reconnectAttempts = 0;
             setConnectionState(true);
 
-            if (isReconnecting) {
+            if (tokenForThisConnection) {
+                joinOpened = true;
+                joinRetryCount = 0;
+                awaitingJoinFinalize = true;
+            } else if (isReconnecting) {
                 if (opts.onReconnect) opts.onReconnect();
                 send("__reconnect", currentPath);
                 isReconnecting = false;
@@ -223,25 +289,70 @@ const Dialup = (() => {
         socket.onmessage = (e) => {
             const msg = JSON.parse(e.data);
 
-            if (msg.target) {
-                const el = document.getElementById(msg.target);
-                if (el) Idiomorph.morph(el, msg.html);
-            } else if (msg.html !== undefined && msg.path !== undefined) {
-                if (msg.path !== currentPath) {
-                    if (!isPopstateNavigation) {
-                        history.pushState({ path: msg.path }, "", msg.path);
+            const handlePagePayload = () => {
+                if (msg.target) {
+                    const el = document.getElementById(msg.target);
+                    if (el) Idiomorph.morph(el, msg.html);
+                } else if (msg.html !== undefined && msg.path !== undefined) {
+                    if (msg.path !== currentPath) {
+                        if (!isPopstateNavigation) {
+                            history.pushState({ path: msg.path }, "", msg.path);
+                        }
                     }
-                }
-                isPopstateNavigation = false;
+                    isPopstateNavigation = false;
 
-                applyUpdate(msg.html, msg.path, msg.push_event, msg.payload);
-                if (msg.title !== undefined) document.title = msg.title;
-                if (msg.ui_locked !== undefined) setUiLock(msg.ui_locked, msg.lock_reason);
-                currentPath = msg.path;
+                    applyUpdate(msg.html, msg.path, msg.push_event, msg.payload);
+                    if (msg.title !== undefined) document.title = msg.title;
+                    if (msg.ui_locked !== undefined) setUiLock(msg.ui_locked, msg.lock_reason);
+                    currentPath = msg.path;
+                }
+            };
+
+            if (awaitingJoinFinalize && msg.join_finalize_nonce) {
+                handlePagePayload();
+                joinFinalizePromise = finalizeBrowserJoin(msg.join_finalize_nonce)
+                    .then(() => {
+                        awaitingJoinFinalize = false;
+                        clearJoinFromUrl();
+                        if (socket?.readyState === WebSocket.OPEN) {
+                            send("__reconnect", currentPath);
+                        }
+                    })
+                    .catch(() => {
+                        awaitingJoinFinalize = false;
+                        socket?.close();
+                        showJoinFailure();
+                    });
+                return;
             }
+
+            handlePagePayload();
         };
 
         socket.onclose = () => {
+            if (awaitingJoinFinalize) {
+                if (joinFinalizePromise) {
+                    joinFinalizePromise
+                        .then(() => {
+                            isReconnecting = true;
+                            scheduleReconnect(opts);
+                        })
+                        .catch(() => showJoinFailure());
+                } else {
+                    showJoinFailure();
+                }
+                return;
+            }
+
+            if (tokenForThisConnection && !joinOpened) {
+                joinRetryCount += 1;
+                if (joinRetryCount >= maxJoinRetries) {
+                    clearJoinFromUrl();
+                    showJoinFailure();
+                    return;
+                }
+                joinToken = tokenForThisConnection;
+            }
             isReconnecting = true;
             scheduleReconnect(opts);
         };
@@ -257,10 +368,23 @@ const Dialup = (() => {
         reconnectTimer = setTimeout(() => connectSocket(opts), delay);
     }
 
+    function connectUrlPath() {
+        const params = new URLSearchParams(window.location.search);
+        const join = params.get("_join") || joinToken;
+
+        if (join && !params.has("_join")) {
+            params.set("_join", join);
+        }
+
+        const search = params.toString();
+        return search ? `${currentPath}?${search}` : currentPath;
+    }
+
     function connect(opts = {}) {
         hooks = opts.hooks ?? {};
         currentPath = window.location.pathname;
-        history.replaceState({ path: currentPath }, "", currentPath);
+        joinToken = new URLSearchParams(window.location.search).get("_join") || joinToken;
+        history.replaceState({ path: currentPath }, "", connectUrlPath());
         setupPopstate();
         setupDelegation();
         connectSocket(opts);

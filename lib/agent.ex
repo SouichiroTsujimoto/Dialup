@@ -15,7 +15,7 @@ defmodule Dialup.Agent do
 
   def endpoint(token), do: "/agent/#{token}"
 
-  @builtin_tool_names ["read_scene", "read_audit_log", "lock_ui", "unlock_ui"]
+  @builtin_tool_names ["read_scene", "read_audit_log", "lock_ui", "unlock_ui", "issue_browser_url"]
   def builtin_tool_names, do: @builtin_tool_names
 
   @doc """
@@ -126,6 +126,13 @@ defmodule Dialup.Agent do
       %{
         "name" => "unlock_ui",
         "description" => "Release a UI lock previously set with lock_ui",
+        "inputSchema" => %{"type" => "object", "properties" => %{}}
+      },
+      %{
+        "name" => "issue_browser_url",
+        "description" =>
+          "Issue a one-time URL for a human to join this session in a browser. " <>
+            "Share the returned browserUrl with the person who should take over or collaborate.",
         "inputSchema" => %{"type" => "object", "properties" => %{}}
       }
     ]
@@ -255,7 +262,8 @@ defmodule Dialup.Agent do
             "`Mcp-Session-Id: {token}`. `/agent/{token}` remains available as a path-token endpoint.",
         "tokenSources" => [
           "POST `/_dialup/agent-handoff?tab_id=...` from the user's open browser tab",
-          "Server-side `Dialup.Session.grant/2` for programmatic access"
+          "Server-side `Dialup.Session.grant/2` for programmatic access",
+          "POST `/_dialup/agent-session` to start an agent-first session without a browser tab"
         ],
         "security" =>
           "Treat session tokens as bearer credentials. They expire and can be revoked."
@@ -631,7 +639,11 @@ defmodule Dialup.Agent do
       "uiLock" =>
         "When the grant allows it, call lock_ui (optionally with a reason) to stop the human from " <>
           "operating the page while you work, and always call unlock_ui when finished. Human " <>
-          "interactions are ignored while locked; read_scene reports uiLocked."
+          "interactions are ignored while locked; read_scene reports uiLocked.",
+      "browserHandoff" =>
+        "When the grant allows it, call issue_browser_url to mint a one-time browserUrl. " <>
+          "A human opening that URL joins the same live session over WebSocket. The token is " <>
+          "single-use and expires quickly; issue a fresh URL if it is consumed or expires."
     }
   end
 end

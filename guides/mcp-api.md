@@ -87,6 +87,7 @@ To operate a user's **live** browser session, obtain a bearer token:
 
 1. **Programmatic** — `Dialup.Session.grant(session_pid, opts)`
 2. **From the open tab** — `POST /_dialup/agent-handoff?tab_id=...` (uses the tab's registry key)
+3. **Agent-first** — `POST /_dialup/agent-session` with `{"path":"/page"}` (no browser tab required)
 
 Then call the MCP endpoint. There are two equivalent ways to present the token:
 
@@ -118,7 +119,7 @@ Supported JSON-RPC methods:
 | `notifications/initialized` | Client ready (no response body) |
 | `ping` | Health check |
 | `tools/list` | Generated tool catalog |
-| `tools/call` | Invoke `read_scene`, `read_audit_log`, `lock_ui`, `unlock_ui`, or a declared action (including navigation actions) |
+| `tools/call` | Invoke `read_scene`, `read_audit_log`, `lock_ui`, `unlock_ui`, `issue_browser_url`, or a declared action (including navigation actions) |
 
 ### Typical flow
 
@@ -222,6 +223,32 @@ end
 
 Always pair `lock_ui` with `unlock_ui` (e.g. in a `try/after`) so the human regains control even if
 the agent errors out. A session timeout also releases the lock when the process is rebuilt.
+
+## Inviting a human to join
+
+When an agent starts or operates a session without a human tab open, it can mint a one-time browser
+join URL through the `issue_browser_url` built-in (gated by the `:issue_browser_url` capability):
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"issue_browser_url","arguments":{}}}
+```
+
+The tool result includes `browserUrl` (for example `/invoices?_join=TOKEN`), `browserToken`, and
+`expiresInMs`. Share `browserUrl` with the person who should join. Opening it attaches their browser
+to the same `UserSessionProcess` over WebSocket.
+
+Join tokens are single-use and expire quickly. Issue a fresh URL if one is consumed or expires.
+
+Grant the capability explicitly when you scope agent authority:
+
+```elixir
+def agent_grant(_assigns) do
+  %{capabilities: [:add_item, :issue_browser_url], projections: [:state, :regions, :actions]}
+end
+```
+
+See [Session tokens for HTTP MCP](./agent-handoff.md) for the full agent-first and browser-handoff
+flow, including `POST /_dialup/agent-session`.
 
 ## Scoped grants
 

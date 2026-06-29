@@ -13,4 +13,20 @@ defmodule Dialup.Session do
   def revoke(session_pid, token) when is_pid(session_pid) do
     Dialup.UserSessionProcess.revoke_agent(session_pid, token)
   end
+
+  @doc """
+  Starts a headless session for an agent without an open browser tab.
+
+  Returns `{:ok, descriptor}` with `token`, `endpoint`, `grant`, `path`, and `sessionId`.
+  """
+  def start(app_module, path, opts \\ %{}) do
+    Dialup.UserSessionProcess.start_headless(app_module, path, Map.new(opts))
+  end
+
+  @doc """
+  Issues a one-time browser join URL for an existing session process.
+  """
+  def browser_url(session_pid) when is_pid(session_pid) do
+    Dialup.UserSessionProcess.issue_browser_token(session_pid)
+  end
 end
