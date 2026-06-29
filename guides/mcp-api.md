@@ -234,8 +234,10 @@ join URL through the `issue_browser_url` built-in (gated by the `:issue_browser_
 ```
 
 The tool result includes `browserUrl` (for example `/invoices?_join=TOKEN`), `browserToken`, and
-`expiresInMs`. Share `browserUrl` with the person who should join. Opening it attaches their browser
-to the same `UserSessionProcess` over WebSocket.
+`expiresInMs`. Share `browserUrl` with the person who should join.
+
+Handoff is attach → `POST /_dialup/finalize-join` (sets cookie, consumes token) → WebSocket
+`__reconnect`. Opening the URL alone does not set a session cookie or complete the join.
 
 Join tokens are single-use and expire quickly. Issue a fresh URL if one is consumed or expires.
 

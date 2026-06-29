@@ -118,6 +118,7 @@ defmodule Dialup.Server do
 
     Notes:
     - Human UI uses WebSocket (`/ws`). Agent tools use HTTP request-response only.
+    - Browser handoff: open `browserUrl`, WebSocket attach with `tab_id` + `join_token`, then POST `/_dialup/finalize-join` (sets cookie, consumes token). See guides/agent-handoff.md.
     - Actions marked `confirm=human` return an isError tool result over HTTP MCP.
     - On a stale `_version`, tools/call returns an isError result whose structuredContent.currentVersion is the latest; call read_scene and retry.
     """

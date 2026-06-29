@@ -89,6 +89,14 @@ they return an isError tool result over HTTP MCP and must be performed in the hu
 - `read_audit_log` exposes the ordered human/agent activity log when granted.
 - Agents use HTTP only — there is no agent WebSocket transport.
 
+## Agent-first sessions and browser handoff
+
+When no human tab exists yet, start a headless session with `Dialup.Session.start/2` or
+`POST /_dialup/agent-session`, operate over MCP, then invite a human with `issue_browser_url`.
+The human opens the one-time `browserUrl`; finalize-join sets their cookie and attaches them to
+the same `UserSessionProcess`. Read [Session tokens for HTTP MCP](./agent-handoff.md) for the full
+attach → finalize → reconnect sequence.
+
 ## Verification checklist
 
 - [ ] Every exposed mutation has exactly one `handle_event/3` implementation.

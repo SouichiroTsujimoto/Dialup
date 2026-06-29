@@ -132,7 +132,8 @@ defmodule Dialup.Agent do
         "name" => "issue_browser_url",
         "description" =>
           "Issue a one-time URL for a human to join this session in a browser. " <>
-            "Share the returned browserUrl with the person who should take over or collaborate.",
+            "Share the returned browserUrl with the person who should take over or collaborate. " <>
+            "Join completes when their client POSTs /_dialup/finalize-join after WebSocket attach.",
         "inputSchema" => %{"type" => "object", "properties" => %{}}
       }
     ]
@@ -642,8 +643,9 @@ defmodule Dialup.Agent do
           "interactions are ignored while locked; read_scene reports uiLocked.",
       "browserHandoff" =>
         "When the grant allows it, call issue_browser_url to mint a one-time browserUrl. " <>
-          "A human opening that URL joins the same live session over WebSocket. The token is " <>
-          "single-use and expires quickly; issue a fresh URL if it is consumed or expires."
+          "The human client attaches over WebSocket, then POSTs /_dialup/finalize-join to set the " <>
+          "cookie and consume the token (single-use). Opening the URL alone does not complete join. " <>
+          "Issue a fresh URL if the token is consumed or expires."
     }
   end
 end

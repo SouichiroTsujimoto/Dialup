@@ -228,6 +228,28 @@ defmodule Dialup.App.Docs.Api.Page do
     """
   end
 
+  defp code_mcp_endpoints do
+    """
+    # 既存タブから MCP token を発行
+    POST /_dialup/agent-handoff?tab_id=TAB_ID
+    Cookie: dialup_session=SESSION_ID
+
+    # 人間タブなしで agent-first 開始
+    POST /_dialup/agent-session
+    Content-Type: application/json
+    {"path":"/invoices"}
+
+    # browser handoff 完了（dialup.js が呼ぶ）
+    POST /_dialup/finalize-join?tab_id=TAB_ID&nonce=NONCE
+
+    # MCP JSON-RPC（Bearer または path token）
+    POST /mcp
+    Authorization: Bearer TOKEN
+
+    POST /agent/TOKEN
+    """
+  end
+
   # ── render ───────────────────────────────────────────────────────────────
 
   def render(assigns) do
@@ -388,6 +410,38 @@ defmodule Dialup.App.Docs.Api.Page do
       意味のある領域は <code>&lt;.dialup_region&gt;</code> / <code>declare_region/1</code> で安定した名前を与えます。
     </p>
     <pre><code>{code_agent_actions()}</code></pre>
+
+    <h2>HTTP MCP セッション API</h2>
+    <p>
+      ライブセッションを操作する bearer token の取得、agent-first 起動、browser handoff の完了
+      エンドポイントです。join token は <code>finalize-join</code> 成功時に消費されます
+      （URL を開いただけでは完了しません）。
+    </p>
+    <pre><code>{code_mcp_endpoints()}</code></pre>
+
+    <table class="attr-table">
+      <thead>
+        <tr><th>エンドポイント</th><th>用途</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>POST /_dialup/agent-handoff</code></td>
+          <td>開いているタブの live session に MCP token を発行</td>
+        </tr>
+        <tr>
+          <td><code>POST /_dialup/agent-session</code></td>
+          <td>headless セッションを起動（browser 未接続）</td>
+        </tr>
+        <tr>
+          <td><code>POST /_dialup/finalize-join</code></td>
+          <td>browser handoff 完了（cookie 設定 + join token 消費）</td>
+        </tr>
+        <tr>
+          <td><code>POST /mcp</code> / <code>POST /agent/:token</code></td>
+          <td>JSON-RPC（<code>tools/list</code>、<code>tools/call</code> など）</td>
+        </tr>
+      </tbody>
+    </table>
 
     <h2>ページモジュールのオプション</h2>
 

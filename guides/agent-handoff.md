@@ -93,8 +93,9 @@ token = descriptor["token"]
 endpoint = descriptor["endpoint"]
 ```
 
-Headless sessions stay alive for 15 minutes while waiting for a browser to join. After a human
-connects, the normal WebSocket timeout rules apply.
+Headless sessions stay alive for up to 15 minutes while waiting for a browser to join.
+Each MCP call resets that idle timer. After a human connects and finalize-join completes,
+the normal WebSocket disconnect timeout applies.
 
 ## Inviting a human to join (browser handoff)
 
@@ -111,13 +112,22 @@ The tool result includes:
 - `browserToken` — the raw join token
 - `expiresInMs` — time until the token expires (default five minutes)
 
-Share `browserUrl` with the person who should join. When they open it:
+Share `browserUrl` with the person who should join. The handoff completes in three server phases:
 
-1. The server sets the `dialup_session` cookie for the target session.
-2. The browser connects over WebSocket with the join token.
-3. The human sees the same live state the agent has been operating.
+| Phase | What happens |
+|-------|----------------|
+| **Attach** | Browser opens the URL (cookie **not** set yet). `dialup.js` connects to `/ws?tab_id=…&join_token=…`. The server reserves the token, attaches the tab to the agent's `UserSessionProcess`, and sends the **live** HTML plus a `join_finalize_nonce`. |
+| **Complete** | The client POSTs `/_dialup/finalize-join?tab_id=…&nonce=…` with `credentials: "same-origin"`. The server sets the `dialup_session` cookie, **consumes the join token** (single-use), and clears pending handoff state. |
+| **Sync** | The client sends `__reconnect` on the WebSocket (or reconnects with the cookie only if the socket dropped after finalize). |
 
-The join token is **single-use**. Issue a fresh URL if it is consumed or expires.
+Requirements and client behavior:
+
+- **`tab_id` is required** on the WebSocket upgrade for join links. `dialup.js` exposes a stable `Dialup.tabId` (stored in `sessionStorage`) for this.
+- **`_join` stays in the URL** until finalize succeeds so a reload can retry the handoff.
+- If finalize does not complete within about 30 seconds, the server rolls back the attach and
+  releases the token for a fresh attempt.
+
+Issue a fresh URL if a token is consumed or expires.
 
 Grant the capability explicitly when you scope agent authority:
 
@@ -135,6 +145,16 @@ From Elixir on the server:
 ```elixir
 {:ok, %{"browserUrl" => url}} = Dialup.Session.browser_url(session_pid)
 ```
+
+### `POST /_dialup/finalize-join`
+
+Called by `dialup.js` during browser handoff (not by agents directly). Query parameters:
+
+- `tab_id` — same value as the WebSocket upgrade
+- `nonce` — value from the `join_finalize_nonce` WebSocket field
+
+On success, responds with `200` and sets the `dialup_session` cookie. This is the **only**
+completion point for a join token.
 
 ### Security notes
 
