@@ -63,7 +63,12 @@ defmodule Dialup.App.Docs.Concepts.Page do
   → page.mount/2（assigns リセット）→ render → HTML 送信
 
 イベント（ws-event / ws-submit / ws-change）:
-  → handle_event/3 → {:update, _} なら render
+  → dialup_action のモードに応じて dispatch
+     command → Context.dispatch/1 → remount
+     set → レンダリング時 map を assigns にマージ
+     navigate → ページ遷移
+     action（legacy）→ handle_event/3
+  → {:update, _} なら render
 
 切断 → 再接続:
   プロセス生存中  : mount なしで現在の state で再描画
@@ -122,7 +127,12 @@ end|
          declare_action / dialup_action
                 │
            tools/list · tools/call
-           issue_browser_url → browser handoff（finalize-join で完了）|
+                │
+    ┌───────────┼───────────┬──────────┬──────────────┐
+    ▼           ▼           ▼          ▼              ▼
+ command       set      navigate   action      issue_browser_url
+ Context    assigns     path      handle_event   → browser handoff
+ dispatch   merge                  /3           (finalize-join で完了)|
 
   def render(assigns) do
     ~H"""
@@ -230,8 +240,9 @@ end|
     <p>
       Dialup のもう一つの中心軸は、人間向け UI 宣言からエージェント向け HTTP MCP API を
       自動生成することです。<code>&lt;.dialup_action&gt;</code> と <code>declare_action/1</code> が
-      <code>tools/list</code> のカタログになり、<code>tools/call</code> は同じ
-      <code>handle_event/3</code> に直列化されます。
+      <code>tools/list</code> のカタログになり、<code>tools/call</code> は宣言されたモードに応じて
+      <code>command</code>（Commanded dispatch + remount）、<code>set</code>（assigns 更新）、
+      <code>navigate</code>、または legacy の <code>handle_event/3</code> に直列化されます。
       標準 MCP クライアントには <code>POST /mcp</code> と bearer token を使い、
       <code>POST /agent/:token</code> は同じハンドラへ届く path-token 形式です。
     </p>

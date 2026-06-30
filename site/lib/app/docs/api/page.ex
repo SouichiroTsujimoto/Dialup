@@ -196,34 +196,63 @@ defmodule Dialup.App.Docs.Api.Page do
     defmodule Dialup.App.Invoice.Page do
       use Dialup.Page
 
-      declare_action name: :add_item,
-                     desc: "明細を追加する",
-                     params: %{sku: :string, qty: {:integer, default: 1}}
+      alias MyApp.Ordering
 
-      declare_region name: :items,
-                     role: "list",
-                     desc: "請求書の明細",
-                     data: :items
-
-      def mount(_params, assigns), do: {:ok, Map.put(assigns, :items, [])}
-      def agent_state(assigns), do: %{items: assigns.items}
-
-      def __available__(:add_item, _assigns), do: true
-
-      def handle_event(:add_item, params, assigns) do
-        item = %{sku: params["sku"], qty: params["qty"]}
-        {:update, Map.update!(assigns, :items, &(&1 ++ [item]))}
+      def mount(_params, assigns) do
+        {:ok, assigns |> set_default(%{items: [], order_id: "ord-1", details_open: false})}
       end
+
+      def agent_state(assigns), do: %{items: assigns.items, details_open: assigns.details_open}
 
       def render(assigns) do
         ~H\"""
-        <.#{region} name={:items} role="list" desc="請求書の明細">
+        <.#{region} name={:items} role="list" desc="請求書の明細" data={@items}>
           <ul><li :for={item <- @items}>{item.sku} x {item.qty}</li></ul>
         </.#{region}>
 
-        <.#{action} name={:add_item} sku="SKU-1" qty="1">追加</.#{action}>
+        <.#{action}
+          command={{Ordering, :add_item}}
+          desc="明細を追加する"
+          params={%{sku: :string, qty: {:integer, default: 1}}}
+          bind={%{order_id: @order_id}}
+          errors={%{too_many: "明細が多すぎます"}}
+          available={length(@items) < 20}
+          sku="SKU-1"
+          qty="1"
+        >
+          追加
+        </.#{action}>
+
+        <.#{action}
+          name={:toggle_details}
+          desc="詳細パネルを開閉"
+          params={%{}}
+          set={%{details_open: !@details_open}}
+        >
+          詳細
+        </.#{action}>
         \"""
       end
+    end
+    """
+  end
+
+  defp code_legacy_action do
+    action = "dialup_action"
+
+    """
+    # legacy モード（handle_event/3 に委譲）
+    <.#{action}
+      name={:archive}
+      desc="請求書をアーカイブする"
+      params={%{}}
+      available={@status == :draft}
+    >
+      アーカイブ
+    </.#{action}>
+
+    def handle_event("archive", _value, assigns) do
+      {:update, Map.put(assigns, :status, :archived)}
     end
     """
   end
@@ -405,11 +434,60 @@ defmodule Dialup.App.Docs.Api.Page do
     <p>
       エージェントに公開する操作は、通常の <code>ws-event</code> ではなく
       <code>&lt;.dialup_action&gt;</code> または <code>declare_action/1</code> で宣言します。
-      実装は人間の UI と同じ <code>handle_event/3</code> に置きます。
-      ナビゲーションも <code>&lt;.dialup_action navigate="/path"&gt;</code> として宣言したリンクだけが tool になります。
-      意味のある領域は <code>&lt;.dialup_region&gt;</code> / <code>declare_region/1</code> で安定した名前を与えます。
+      人間の WebSocket イベントとエージェントの <code>tools/call</code> は同じ
+      <code>UserSessionProcess</code> に直列化されます。
+      ナビゲーションは <code>&lt;.dialup_action navigate="/path"&gt;</code> として宣言したリンクだけが
+      tool になります。意味のある領域は <code>&lt;.dialup_region&gt;</code> /
+      <code>declare_region/1</code> で安定した名前を与えます。
     </p>
+
+    <h3>Action モード</h3>
+    <p>
+      <code>&lt;.dialup_action&gt;</code> は次の 4 モードのいずれか 1 つだけを指定します。
+      <code>tools/list</code> の各 tool には <code>_meta.mode</code> が付きます。
+    </p>
+
+    <table class="attr-table">
+      <thead>
+        <tr><th>モード</th><th>属性</th><th>サーバー側ルーティング</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>command</code></td>
+          <td><code>command=&#123;&#123;Context, :cmd&#125;&#125;</code></td>
+          <td>Commanded コマンドを組み立て → <code>Context.dispatch/1</code> → ページ remount</td>
+        </tr>
+        <tr>
+          <td><code>set</code></td>
+          <td><code>set=&#123;%&#123;key: value&#125;&#125;</code></td>
+          <td>レンダリング時の map を assigns にマージ（UI 専用 state）</td>
+        </tr>
+        <tr>
+          <td><code>navigate</code></td>
+          <td><code>navigate="/path"</code></td>
+          <td>宣言済みパスへ遷移</td>
+        </tr>
+        <tr>
+          <td><code>action</code>（legacy）</td>
+          <td><code>name=&#123;:event&#125;</code></td>
+          <td><code>handle_event/3</code> に委譲</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>
+      Commanded / CQRS を使う場合は <code>command</code> モードを優先し、
+      <code>use Dialup.CommandedContext</code> と
+      <code>mix dialup.gen.aggregate</code> でスキャフォールドを生成します。
+      <code>available=&#123;...&#125;</code> はコンパイル時に <code>__available__/2</code> を導出し、
+      人間の UI とエージェントの <code>tools/list</code> で同じ条件を共有します。
+      詳細は Hex ガイド <em>Building agent-native applications</em> を参照してください。
+    </p>
+
     <pre><code>{code_agent_actions()}</code></pre>
+
+    <p>フォーム送信や段階的移行が必要な操作は legacy モードで <code>handle_event/3</code> に残せます。</p>
+    <pre><code>{code_legacy_action()}</code></pre>
 
     <h2>HTTP MCP セッション API</h2>
     <p>

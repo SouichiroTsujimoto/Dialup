@@ -34,37 +34,55 @@ consistent.
 defmodule Dialup.App.Invoice.Page do
   use Dialup.Page
 
-  declare_action name: :add_item,
-                 desc: "Add a line item",
-                 params: %{sku: :string, qty: {:integer, default: 1}}
+  alias MyApp.Ordering
 
-  declare_region name: :items, role: "list", desc: "Invoice line items", data: :items
-
-  def mount(_params, assigns), do: {:ok, Map.put(assigns, :items, [])}
-
-  def __available__(:add_item, _assigns), do: true
+  def mount(_params, assigns) do
+    {:ok, assigns |> set_default(%{items: [], order_id: "ord-1"})}
+  end
 
   def agent_state(assigns), do: %{items: assigns.items}
 
-  def handle_event(:add_item, params, assigns) do
-    item = %{sku: params["sku"], qty: params["qty"]}
-    {:update, Map.put(assigns, :items, assigns.items ++ [item])}
-  end
-
   def render(assigns) do
     ~H"""
-    <.dialup_region name={:items} role="list" desc="Invoice line items">
+    <.dialup_region name={:items} role="list" desc="Invoice line items" data={@items}>
       <ul><li :for={i <- @items}>{i.sku} × {i.qty}</li></ul>
     </.dialup_region>
 
-    <.dialup_action name={:add_item} sku="SKU-1" qty="1">Add item</.dialup_action>
+    <.dialup_action
+      command={{Ordering, :add_item}}
+      desc="Add a line item"
+      params={%{sku: :string, qty: {:integer, default: 1}}}
+      bind={%{order_id: @order_id}}
+      errors={%{too_many: "Too many line items"}}
+      available={length(@items) < 20}
+      sku="SKU-1"
+      qty="1"
+    >
+      Add item
+    </.dialup_action>
     """
   end
 end
 ```
 
+For UI-only toggles without Commanded, use `set` mode inline in HEEx (not via `declare_action/1`):
+
+```elixir
+<.dialup_action
+  name={:toggle_sidebar}
+  desc="Toggle the sidebar"
+  params={%{}}
+  set={%{sidebar_open: !@sidebar_open}}
+>
+  Toggle
+</.dialup_action>
+```
+
+Legacy actions that still use `handle_event/3` remain valid — see the `action` row in the mode table
+above.
+
 No separate REST controller. No OpenAPI hand-authoring. The catalog is derived from compile-time
-declarations and runtime availability via `__available__/2`.
+declarations and runtime availability via `available={...}` / generated `__available__/2`.
 
 ### The declaration boundary
 

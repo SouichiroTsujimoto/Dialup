@@ -3,8 +3,9 @@
 Ecto（DB）とPubSub（リアルタイム通信）を組み合わせたフルスタックアプリケーションの作成例。
 
 > **Commanded / CQRS を使う場合:** 状態変更は `<.dialup_action command={...}>` で宣言し、
-> `mix dialup.gen.aggregate` で集約・コマンド・プロジェクタを生成します。ページの `mount/2`
-> は Read Model を読み、成功した dispatch 後にフレームワークが自動 remount します。
+> `mix dialup.gen.aggregate Ordering Order orders add_item:sku:string confirm` で
+> 集約・コマンド・プロジェクタを生成します。ページの `mount/2` は Read Model を読み、
+> 成功した dispatch 後にフレームワークが自動 remount します。
 > 詳細は [Building agent-native applications](./agent-native-app-development.md) を参照してください。
 
 ## このガイドで作るもの

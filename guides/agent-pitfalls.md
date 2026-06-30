@@ -116,3 +116,35 @@ Browser handoff has one completion point:
 - Treat `issue_browser_url` tokens as consumed only after finalize-join succeeds.
 
 See [Session tokens for HTTP MCP](./agent-handoff.md).
+
+---
+
+## 4. A `command` action shadows legacy `handle_event/3` for the same name
+
+### The mistake
+
+A page keeps `handle_event("increment", ...)` and adds
+`<.dialup_action command={{Ordering, :increment}}>`. The agent and human UI call the command path;
+the `handle_event/3` clause is never reached for that event name.
+
+### How to avoid it
+
+- Remove the legacy handler when migrating to `command` mode, or use a different action name.
+- Prefer `command` for Commanded-backed mutations so dispatch and remount stay in the framework.
+
+---
+
+## 5. `bind={...}` and `set={...}` are evaluated at render time
+
+### The mistake
+
+Docs or mental models treat `bind={%{order_id: @order.id}}` as compile-time metadata. The bind map
+is recorded when the page **renders**, using current assigns — same as `set={%{sidebar_open: !@sidebar_open}}`.
+
+### The reality
+
+- `bind` values come from the latest render (via `BindActions`); dispatch reads that snapshot.
+- If a command button is not rendered (`:if={false}`), bind may fall back to empty compile-time metadata.
+- Keep `available={...}` aligned so agents do not call tools for off-screen actions.
+
+See [Building agent-native applications](./agent-native-app-development.md).

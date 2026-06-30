@@ -89,6 +89,9 @@ Generate Commanded scaffolding with:
 mix dialup.gen.aggregate Ordering Order orders add_item:sku:string confirm
 ```
 
+Map bounded contexts with `use Dialup.Contexts` and inspect the graph via
+`mix dialup.context_map` (see `Dialup.Contexts` moduledoc).
+
 ### 3. Define live availability
 
 Write the same predicate on the HTML control and in action metadata. Dialup derives
