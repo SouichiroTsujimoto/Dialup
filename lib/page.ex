@@ -133,9 +133,19 @@ defmodule Dialup.Page do
   """
   defmacro declare_action(opts) do
     {opts, _binding} = Code.eval_quoted(opts, [], __CALLER__)
+    opts = Map.new(opts)
+
+    opts =
+      case Map.pop(opts, :available) do
+        {nil, opts} ->
+          opts
+
+        {ast, opts} ->
+          Map.put(opts, :available_expr, Macro.to_string(ast))
+      end
 
     quote do
-      @dialup_actions unquote(Macro.escape(Map.new(opts)))
+      @dialup_actions unquote(Macro.escape(opts))
     end
   end
 
@@ -200,6 +210,81 @@ defmodule Dialup.Page do
     """
   end
 
+  def dialup_action(%{command: command} = assigns) when not is_nil(command) do
+    {context_module, command_name} = normalize_command!(command)
+    name = assigns |> Map.get(:name, command_name) |> to_string()
+    available = Map.get(assigns, :available, true)
+    bind = Map.get(assigns, :bind, %{})
+    Dialup.BindActions.record(name, bind)
+
+    params =
+      assigns
+      |> Map.drop(action_reserved_keys())
+      |> Jason.encode!()
+
+    assigns =
+      assigns
+      |> Phoenix.Component.assign(:action_name, name)
+      |> Phoenix.Component.assign(:available, available)
+      |> Phoenix.Component.assign(:confirm_name, assigns[:confirm] && to_string(assigns[:confirm]))
+      |> Phoenix.Component.assign(:action_desc, Map.get(assigns, :desc))
+      |> Phoenix.Component.assign(:encoded_params, params)
+      |> Phoenix.Component.assign_new(:class, fn -> nil end)
+      |> Phoenix.Component.assign_new(:id, fn -> nil end)
+      |> Phoenix.Component.assign_new(:type, fn -> "button" end)
+
+    _ = context_module
+
+    ~H"""
+    <button
+      id={@id}
+      type={@type}
+      class={@class}
+      ws-event={@action_name}
+      data-dialup-id={@action_name}
+      data-dialup-kind="command"
+      data-dialup-params={@encoded_params}
+      data-dialup-confirm={@confirm_name}
+      data-dialup-desc={@action_desc}
+      disabled={!@available}
+      aria-disabled={to_string(!@available)}
+    >
+      {render_slot(@inner_block)}
+    </button>
+    """
+  end
+
+  def dialup_action(%{set: set} = assigns) when is_map(set) do
+    name = assigns |> Map.fetch!(:name) |> to_string()
+    available = Map.get(assigns, :available, true)
+    Dialup.SetActions.record(name, set)
+
+    assigns =
+      assigns
+      |> Phoenix.Component.assign(:action_name, name)
+      |> Phoenix.Component.assign(:available, available)
+      |> Phoenix.Component.assign(:action_desc, Map.get(assigns, :desc))
+      |> Phoenix.Component.assign_new(:class, fn -> nil end)
+      |> Phoenix.Component.assign_new(:id, fn -> nil end)
+      |> Phoenix.Component.assign_new(:type, fn -> "button" end)
+
+    ~H"""
+    <button
+      id={@id}
+      type={@type}
+      class={@class}
+      ws-event={@action_name}
+      data-dialup-id={@action_name}
+      data-dialup-kind="set"
+      data-dialup-desc={@action_desc}
+      disabled={!@available}
+      aria-disabled={to_string(!@available)}
+    >
+      {render_slot(@inner_block)}
+    </button>
+    """
+  end
+
   def dialup_action(assigns) do
     name = assigns |> Map.fetch!(:name) |> to_string()
     available = Map.get(assigns, :available, true)
@@ -207,26 +292,7 @@ defmodule Dialup.Page do
 
     params =
       assigns
-      |> Map.drop([
-        :__changed__,
-        :inner_block,
-        :name,
-        :available,
-        :confirm,
-        :desc,
-        :params,
-        :agent_only,
-        :risk,
-        :effects,
-        :reversible,
-        :idempotent,
-        :examples,
-        :success,
-        :class,
-        :id,
-        :type,
-        :navigate
-      ])
+      |> Map.drop(action_reserved_keys())
       |> Jason.encode!()
 
     assigns =
@@ -280,6 +346,59 @@ defmodule Dialup.Page do
 
     String.to_atom("navigate_" <> slug)
   end
+
+  defp normalize_command!({context_module, command_name})
+       when is_atom(context_module) and is_atom(command_name),
+       do: {context_module, command_name}
+
+  defp normalize_command!({context_module, command_name})
+       when is_atom(context_module) and is_binary(command_name),
+       do: {context_module, String.to_atom(command_name)}
+
+  defp normalize_command!(other) do
+    raise ArgumentError,
+          "command must be {ContextModule, :command_name}, got: #{inspect(other)}"
+  end
+
+  defp action_reserved_keys do
+    [
+      :__changed__,
+      :inner_block,
+      :name,
+      :available,
+      :confirm,
+      :desc,
+      :params,
+      :agent_only,
+      :risk,
+      :effects,
+      :reversible,
+      :idempotent,
+      :examples,
+      :success,
+      :class,
+      :id,
+      :type,
+      :navigate,
+      :command,
+      :bind,
+      :errors,
+      :set
+    ]
+  end
+
+  @doc false
+  def action_mode(action) do
+    cond do
+      Map.has_key?(action, :navigate) -> :navigate
+      Map.has_key?(action, :command) -> :command
+      Map.has_key?(action, :set) -> :set
+      true -> :action
+    end
+  end
+
+  @doc false
+  def command_action_name({_context, command_name}), do: command_name
 
   defp segment_slug(segment) do
     segment
@@ -512,6 +631,9 @@ defmodule Dialup.Page do
     declared_regions = env.module |> Module.get_attribute(:dialup_regions, []) |> Enum.reverse()
     regions = merge_regions!(env, declared_regions, extract_inline_regions!(env))
     validate_semantic_declarations!(env, actions, regions)
+    validate_action_modes!(env, actions)
+
+    available_quote = available_codegen!(env, actions)
 
     layout_quote =
       quote do
@@ -523,6 +645,7 @@ defmodule Dialup.Page do
       unquote(render_quote)
       unquote(css_quote)
       unquote(layout_quote)
+      unquote(available_quote)
       def __dialup_actions__, do: unquote(Macro.escape(actions))
       def __dialup_regions__, do: unquote(Macro.escape(regions))
     end
@@ -563,11 +686,55 @@ defmodule Dialup.Page do
     validate_navigate_paths!(env, actions)
 
     Enum.each(actions, fn action ->
-      for key <- [:name, :desc, :params], not Map.has_key?(action, key) do
-        raise CompileError,
-          file: env.file,
-          line: env.line,
-          description: "Dialup action is missing required #{inspect(key)} metadata"
+      mode = action_mode(action)
+
+      cond do
+        mode == :navigate ->
+          for key <- [:name, :desc, :params, :navigate], not Map.has_key?(action, key) do
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description: "Dialup navigation action is missing required #{inspect(key)} metadata"
+          end
+
+        mode == :command ->
+          for key <- [:name, :desc, :params, :command], not Map.has_key?(action, key) do
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description: "Dialup command action is missing required #{inspect(key)} metadata"
+          end
+
+        mode == :set ->
+          if Map.get(action, :set) != :runtime do
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description:
+                "Dialup set actions must be declared inline in HEEx with set={...}, not via declare_action/1"
+          end
+
+          for key <- [:name, :desc, :set], not Map.has_key?(action, key) do
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description: "Dialup set action is missing required #{inspect(key)} metadata"
+          end
+
+          unless Map.has_key?(action, :params) do
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description: "Dialup set action #{inspect(action.name)} must declare params: %{}"
+          end
+
+        true ->
+          for key <- [:name, :desc, :params], not Map.has_key?(action, key) do
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description: "Dialup action is missing required #{inspect(key)} metadata"
+          end
       end
     end)
 
@@ -661,14 +828,81 @@ defmodule Dialup.Page do
     |> semantic_source()
     |> component_openings("<.dialup_action")
     |> Enum.flat_map(fn attrs ->
+      validate_inline_modes!(env, attrs)
+
       navigate = component_attr(attrs, "navigate", env)
-      name = component_action_name!(attrs, env)
+      command = component_attr(attrs, "command", env)
+      set = component_attr(attrs, "set", env)
+      name = component_action_name!(attrs, env, command)
       desc = component_attr(attrs, "desc", env)
       params = component_attr(attrs, "params", env)
+      available_expr = component_attr_ast(attrs, "available")
+
+      common =
+        %{
+          confirm: component_attr(attrs, "confirm", env),
+          agent_only: component_attr(attrs, "agent_only", env) || false,
+          risk: component_attr(attrs, "risk", env),
+          effects: component_attr(attrs, "effects", env),
+          reversible: component_attr(attrs, "reversible", env),
+          idempotent: component_attr(attrs, "idempotent", env),
+          examples: component_attr(attrs, "examples", env),
+          success: component_attr(attrs, "success", env),
+          available_expr: available_expr
+        }
+        |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+        |> Map.new()
 
       cond do
         not is_nil(navigate) ->
-          [navigate_declaration(attrs, env, name, navigate, desc)]
+          [Map.merge(navigate_declaration(attrs, env, name, navigate, desc), common)]
+
+        not is_nil(command) ->
+          if is_nil(desc) and is_nil(params) do
+            []
+          else
+            if is_nil(desc) or is_nil(params) do
+              raise CompileError,
+                file: env.file,
+                line: env.line,
+                description:
+                  "inline Dialup command action #{inspect(name)} must provide both desc and params"
+            end
+
+            [
+              Map.merge(
+                %{
+                  name: name,
+                  desc: desc,
+                  params: params,
+                  command: command,
+                  bind: component_attr(attrs, "bind", env) || %{},
+                  errors: component_attr(attrs, "errors", env) || %{}
+                },
+                common
+              )
+            ]
+          end
+
+        not is_nil(set) ->
+          if is_nil(desc) do
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description: "inline Dialup set action #{inspect(name)} must provide desc"
+          end
+
+          [
+            Map.merge(
+              %{
+                name: name,
+                desc: desc,
+                params: params || %{},
+                set: :runtime
+              },
+              common
+            )
+          ]
 
         is_nil(desc) and is_nil(params) ->
           []
@@ -680,25 +914,108 @@ defmodule Dialup.Page do
             description: "inline Dialup action #{inspect(name)} must provide both desc and params"
 
         true ->
-          [
-            %{
-              name: name,
-              desc: desc,
-              params: params,
-              confirm: component_attr(attrs, "confirm", env),
-              agent_only: component_attr(attrs, "agent_only", env) || false,
-              risk: component_attr(attrs, "risk", env),
-              effects: component_attr(attrs, "effects", env),
-              reversible: component_attr(attrs, "reversible", env),
-              idempotent: component_attr(attrs, "idempotent", env),
-              examples: component_attr(attrs, "examples", env),
-              success: component_attr(attrs, "success", env)
-            }
-            |> Enum.reject(fn {_key, value} -> is_nil(value) end)
-            |> Map.new()
-          ]
+          [Map.merge(%{name: name, desc: desc, params: params}, common)]
       end
     end)
+  end
+
+  defp validate_inline_modes!(env, attrs) do
+    modes =
+      [
+        {"navigate", component_attr(attrs, "navigate", env)},
+        {"command", component_attr(attrs, "command", env)},
+        {"set", component_attr(attrs, "set", env)}
+      ]
+      |> Enum.reject(fn {_name, value} -> is_nil(value) end)
+
+    if length(modes) > 1 do
+      names = Enum.map(modes, &elem(&1, 0))
+
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "Dialup action modes are exclusive; found #{inspect(names)} on one <.dialup_action>"
+    end
+  end
+
+  defp validate_action_modes!(env, actions) do
+    Enum.each(actions, fn action ->
+      modes =
+        [:navigate, :command, :set]
+        |> Enum.filter(&Map.has_key?(action, &1))
+
+      if length(modes) > 1 do
+        raise CompileError,
+          file: env.file,
+          line: env.line,
+          description:
+            "Dialup action #{inspect(action.name)} declares multiple modes: #{inspect(modes)}"
+      end
+    end)
+  end
+
+  @doc false
+  def eval_available!(expr, assigns) when is_binary(expr) and is_map(assigns) do
+    normalized =
+      Regex.replace(~r/@(\w+)/, expr, fn _, key ->
+        "Map.get(assigns, :#{key})"
+      end)
+
+    {result, _} = Code.eval_string(normalized, [assigns: assigns], [])
+    result
+  end
+
+  defp available_codegen!(env, actions) do
+    available_actions = Enum.filter(actions, &Map.has_key?(&1, :available_expr))
+
+    user_defined = Module.defines?(env.module, {:__available__, 2})
+
+    if available_actions != [] and user_defined do
+      raise CompileError,
+        file: env.file,
+        line: env.line,
+        description:
+          "#{inspect(env.module)} defines __available__/2 manually, but available={...} " <>
+            "expressions also exist on <.dialup_action>. Remove one or the other."
+    end
+
+    if available_actions == [] do
+      quote do
+      end
+    else
+      clauses =
+        Enum.map(available_actions, fn action ->
+          quote do
+            def __available__(unquote(action.name), assigns) do
+              Dialup.Page.eval_available!(unquote(action.available_expr), assigns)
+            end
+          end
+        end)
+
+      fallback_names =
+        actions
+        |> Enum.reject(&Map.has_key?(&1, :available_expr))
+        |> Enum.map(& &1.name)
+
+      fallback_clauses =
+        Enum.map(fallback_names, fn name ->
+          quote do
+            def __available__(unquote(name), _assigns), do: true
+          end
+        end)
+
+      catch_all =
+        quote do
+          def __available__(_action, _assigns), do: true
+        end
+
+      quote do
+        unquote_splicing(clauses)
+        unquote_splicing(fallback_clauses)
+        unquote(catch_all)
+      end
+    end
   end
 
   defp navigate_declaration(attrs, env, name, navigate, desc) do
@@ -709,7 +1026,8 @@ defmodule Dialup.Page do
       params: %{},
       confirm: component_attr(attrs, "confirm", env),
       risk: component_attr(attrs, "risk", env),
-      effects: component_attr(attrs, "effects", env)
+      effects: component_attr(attrs, "effects", env),
+      available_expr: component_attr_ast(attrs, "available")
     }
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.new()
@@ -843,30 +1161,64 @@ defmodule Dialup.Page do
     end
   end
 
-  # Like required_component_name!/2, but derives the name from a navigate target
-  # when no explicit name is given.
-  defp component_action_name!(attrs, env) do
+  # Like required_component_name!/2, but derives the name from navigate or command
+  # targets when no explicit name is given.
+  defp component_action_name!(attrs, env, command \\ nil) do
+    command = command || component_attr(attrs, "command", env)
+
     case component_attr(attrs, "name", env) do
       nil ->
-        case component_attr(attrs, "navigate", env) do
-          path when is_binary(path) ->
-            navigate_action_name(path)
+        cond do
+          not is_nil(command) ->
+            command_action_name(command)
 
-          nil ->
-            raise CompileError,
-              file: env.file,
-              line: env.line,
-              description: "Dialup action must provide a compile-time name or navigate target"
+          true ->
+            case component_attr(attrs, "navigate", env) do
+              path when is_binary(path) ->
+                navigate_action_name(path)
 
-          _other ->
-            raise CompileError,
-              file: env.file,
-              line: env.line,
-              description: "Dialup action navigate target must be a compile-time string"
+              nil ->
+                case component_attr(attrs, "set", env) do
+                  nil ->
+                    raise CompileError,
+                      file: env.file,
+                      line: env.line,
+                      description:
+                        "Dialup action must provide a compile-time name, navigate target, or command"
+
+                  _ ->
+                    raise CompileError,
+                      file: env.file,
+                      line: env.line,
+                      description: "Dialup set action must provide an explicit name={...}"
+                end
+
+              _other ->
+                raise CompileError,
+                  file: env.file,
+                  line: env.line,
+                  description: "Dialup action navigate target must be a compile-time string"
+            end
         end
 
       name ->
         name
+    end
+  end
+
+  defp component_attr_ast(attrs, key) do
+    braced = ~r/\b#{Regex.escape(key)}\s*=\s*\{/
+
+    case Regex.run(braced, attrs, return: :index) do
+      [{start, length}] ->
+        expression_and_rest =
+          binary_part(attrs, start + length, byte_size(attrs) - start - length)
+
+        {expression, _rest} = take_expression(expression_and_rest, 1, nil, [])
+        String.trim(expression)
+
+      nil ->
+        nil
     end
   end
 

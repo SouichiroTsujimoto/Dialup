@@ -1,0 +1,9 @@
+defmodule <%= base_mod %>.CommandedApp do
+  @moduledoc false
+  use Commanded.Application,
+    otp_app: :<%= otp_app %>,
+    event_store: [
+      adapter: Commanded.EventStore.Adapters.EventStore,
+      event_store: <%= base_mod %>.EventStore
+    ]
+end

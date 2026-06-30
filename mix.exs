@@ -70,6 +70,10 @@ defmodule Dialup.MixProject do
       {:phoenix_live_view, "~> 1.0"},
       {:telemetry, "~> 1.0"},
 
+      # Optional CQRS/ES integration (Dialup.CommandedContext)
+      {:commanded, "~> 1.4", optional: true},
+      {:eventstore, "~> 1.4", optional: true},
+
       # 開発依存
       {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]

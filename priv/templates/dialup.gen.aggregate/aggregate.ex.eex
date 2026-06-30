@@ -1,0 +1,18 @@
+defmodule <%= agg_mod %> do
+  @moduledoc false
+  defstruct [:id, :status<%= for field <- all_unique_fields do %>, :<%= field.name %><% end %>]
+
+  alias <%= context_mod %>.Commands
+  alias <%= context_mod %>.Events
+
+<%= for cmd <- commands do %>  def execute(%__MODULE__{} = _state, %Commands.<%= Macro.camelize(cmd.name) %>{} = cmd) do
+    %Events.<%= cmd.event_module %>{
+<%= for field <- cmd.fields do %>      <%= field.name %>: cmd.<%= field.name %>,
+<% end %>    }
+  end
+
+<% end %><%= for cmd <- commands do %>  def apply(%__MODULE__{} = state, %Events.<%= cmd.event_module %>{}) do
+    %{state | status: :<%= cmd.name %>_applied}
+  end
+
+<% end %>end

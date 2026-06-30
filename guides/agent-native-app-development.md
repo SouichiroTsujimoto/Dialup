@@ -14,12 +14,16 @@ regions in the page that owns the state.
 
 An agent-enabled page has five parts:
 
-1. `mount/2` creates the session state.
-2. `handle_event/3` is the single implementation of state-changing operations.
-3. `<.dialup_action>` / `declare_action/1` declare operations for humans and agents.
-4. `<.dialup_region>` / `declare_region/1` declare stable semantic areas and projected data.
-5. `agent_state/1`, `agent_message/1`, and `agent_grant/1` define the machine projection,
+1. `mount/2` creates the session state (often from a Commanded read model).
+2. `<.dialup_action>` / `declare_action/1` declare operations in one of four modes:
+   `command`, `set`, `navigate`, or legacy `name`/`handle_event/3`.
+3. `<.dialup_region>` / `declare_region/1` declare stable semantic areas and projected data.
+4. `agent_state/1`, `agent_message/1`, and `agent_grant/1` define the machine projection,
    operating instructions, and authority boundary.
+5. Optional: `handle_event/3` for legacy actions not yet migrated to declarative modes.
+
+For Commanded-backed pages, prefer `command` and `set` modes so the framework dispatches
+commands and updates assigns without duplicating logic in `handle_event/3`.
 
 Human browser events and agent `tools/call` requests are serialized through the same
 `UserSessionProcess`. Every mutation advances a state version. Agents must read the scene,
@@ -41,13 +45,79 @@ second agent-only state store.
 For every operation, define a stable name, description, input schema, effects, risk,
 reversibility, examples, success criteria, and whether human confirmation is required.
 
-Put metadata on `<.dialup_action>` or hoist with `declare_action/1`. The implementation lives
-only in `handle_event/3`.
+Put metadata on `<.dialup_action>` or hoist with `declare_action/1`.
+
+**Action modes:**
+
+| Mode | Attribute | Routing |
+|------|-----------|---------|
+| `command` | `command={{Context, :cmd}}` | Builds a Commanded command, calls `Context.dispatch/1`, remounts the page |
+| `set` | `set={%{key: value}}` | Merges the rendered update map into assigns |
+| `navigate` | `navigate="/path"` | Navigates to another page |
+| `action` (legacy) | `name={:event}` | Calls `handle_event/3` |
+
+Example command action:
+
+```elixir
+<.dialup_action
+  command={{MyApp.Ordering, :add_item}}
+  desc="Add a line item"
+  params={%{sku: :string, qty: :integer}}
+  bind={%{order_id: @order.id}}
+  errors={%{too_many_items: "Cannot add more items"}}
+  available={@order.status == :draft}
+>
+  Add item
+</.dialup_action>
+```
+
+Example set action (UI-only state):
+
+```elixir
+<.dialup_action
+  name={:toggle_sidebar}
+  desc="Toggle the sidebar"
+  set={%{sidebar_open: !@sidebar_open}}
+>
+  Toggle
+</.dialup_action>
+```
+
+Generate Commanded scaffolding with:
+
+```bash
+mix dialup.gen.aggregate Ordering Order orders add_item:sku:string confirm
+```
 
 ### 3. Define live availability
 
-Define `__available__/2` with the same predicate as the HTML `available={...}` attribute.
-Agent calls are checked server-side; they do not click buttons.
+Write the same predicate on the HTML control and in action metadata. Dialup derives
+`__available__/2` from `available={...}` at compile time — you do not need to implement it by
+hand unless you are mixing manual and declarative actions.
+
+```elixir
+<.dialup_action
+  command={{MyApp.Ordering, :confirm}}
+  available={@order.status == :draft and @order.lines != []}
+  ...
+/>
+```
+
+Agent calls are checked server-side against the generated `__available__/2`; they do not click
+buttons. Defining `__available__/2` manually while also using `available={...}` on the same page
+is a compile error.
+
+#### Migrating from hand-written `__available__/2`
+
+1. Copy each predicate from your existing `def __available__(action, assigns)` clauses.
+2. Paste it into `available={...}` on the matching `<.dialup_action>` (use `@assign` syntax in
+   HEEx) or into `declare_action available: quote(do: assigns.field == ...)` for hoisted actions.
+3. Delete the manual `__available__/2` definitions.
+4. Run `mix test`. If both manual and derived availability remain, compilation fails with a
+   clear error pointing at the conflict.
+
+The HTML `available={...}` attribute and the generated server predicate always stay in sync —
+agents see the same gates as humans in the browser.
 
 ### 4. Add regions where meaning must survive layout changes
 
@@ -99,12 +169,13 @@ attach → finalize → reconnect sequence.
 
 ## Verification checklist
 
-- [ ] Every exposed mutation has exactly one `handle_event/3` implementation.
+- [ ] Every exposed mutation is declared with `<.dialup_action>` / `declare_action/1`.
+- [ ] Command-backed mutations use `command={...}` and a `Dialup.CommandedContext` module.
 - [ ] Every action has `desc`, `params`, effects, risk, and a verifiable success condition.
-- [ ] Browser and agent availability use the same `__available__/2` predicate.
+- [ ] Browser and agent availability use the same `available={...}` predicate.
 - [ ] `agent_state/1` and region data contain no secrets.
 - [ ] `agent_message/1` is understandable without source-code context.
-- [ ] `tools/list` matches the declared actions on the page.
+- [ ] `tools/list` matches the declared actions on the page (check `_meta.mode`).
 - [ ] Stale-version, grant expiry, and revocation paths are tested.
 
 Use [dialup-framework.org/agent_demo](https://dialup-framework.org/agent_demo) as a reference.

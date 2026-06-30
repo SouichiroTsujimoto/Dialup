@@ -135,7 +135,9 @@ defmodule Dialup.UserSessionProcess do
       version: 0,
       audit_log: [],
       ui_locked: false,
-      lock_reason: nil
+      lock_reason: nil,
+      set_actions: %{},
+      bind_actions: %{}
     }
 
     state =
@@ -704,7 +706,7 @@ defmodule Dialup.UserSessionProcess do
             {:push_event, event_name, event_payload, new_merged} ->
               {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
               new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-              send_push_event(new_state, event_name, event_payload)
+              new_state = send_push_event(new_state, event_name, event_payload)
               {:noreply, new_state}
           end
         rescue
@@ -980,12 +982,38 @@ defmodule Dialup.UserSessionProcess do
   end
 
   defp render(state) do
+    Dialup.SetActions.begin_collect()
+    Dialup.BindActions.begin_collect()
+    html = do_render(state)
+    set_actions = Dialup.SetActions.collect()
+    bind_actions = Dialup.BindActions.collect()
+    Dialup.SetActions.clear()
+    Dialup.BindActions.clear()
+    Process.put(:dialup_last_set_actions, set_actions)
+    Process.put(:dialup_last_bind_actions, bind_actions)
+    html
+  end
+
+  defp do_render(state) do
     render_assigns = merge_for_render(state)
 
     case state.app_module.dispatch(state.path, render_assigns) do
       {:ok, html} -> html
       {:error, :not_found} -> render_error_page(404, state)
     end
+  end
+
+  defp capture_render_actions(state) do
+    set_actions = Process.get(:dialup_last_set_actions, state.set_actions)
+    bind_actions = Process.get(:dialup_last_bind_actions, state.bind_actions)
+    Process.delete(:dialup_last_set_actions)
+    Process.delete(:dialup_last_bind_actions)
+    %{state | set_actions: set_actions, bind_actions: bind_actions}
+  end
+
+  defp refresh_render_actions(state) do
+    _html = render(state)
+    capture_render_actions(state)
   end
 
   defp put_title(payload, state) do
@@ -1035,14 +1063,20 @@ defmodule Dialup.UserSessionProcess do
   end
 
   defp update_page(state) do
-    if state.socket_pid do
-      html = render(state)
-      payload = %{html: html, path: state.path}
-      payload = put_title(payload, state)
-      payload = put_ui_lock(payload, state)
-      payload = put_finalize_nonce(payload, state)
-      send(state.socket_pid, {:send_html, Jason.encode!(payload)})
-    end
+    state =
+      if state.socket_pid do
+        html = render(state)
+        state = capture_render_actions(state)
+
+        payload = %{html: html, path: state.path}
+        payload = put_title(payload, state)
+        payload = put_ui_lock(payload, state)
+        payload = put_finalize_nonce(payload, state)
+        send(state.socket_pid, {:send_html, Jason.encode!(payload)})
+        state
+      else
+        state
+      end
 
     state
   end
@@ -1068,44 +1102,181 @@ defmodule Dialup.UserSessionProcess do
 
   defp apply_event(page_module, event, value, state) do
     merged = merge_for_render(state)
+    action = Dialup.Agent.action(page_module, event, layout_actions(state))
 
     try do
-      case page_module.handle_event(event, value, merged) do
-        {:noreply, new_merged} ->
-          {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-          new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-          {:ok, new_state}
+      case action do
+        %{set: _} = action ->
+          apply_set_action(state, action, merged)
 
-        {:update, new_merged} ->
-          {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-          new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-          {:ok, update_page(new_state)}
+        %{command: _command} = action ->
+          apply_command_action(state, action, value)
 
-        {:patch, target, rendered, new_merged} ->
-          {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-          new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-          html = to_html(rendered)
-          payload = Jason.encode!(%{target: target, html: html})
-          if state.socket_pid, do: send(state.socket_pid, {:send_html, payload})
-          {:ok, new_state}
-
-        {:redirect, path, new_merged} ->
-          {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-          new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-          {:ok, do_navigate(path, new_state)}
-
-        {:push_event, event_name, event_payload, new_merged} ->
-          {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
-          new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-          send_push_event(new_state, event_name, event_payload)
-          {:ok, new_state}
-
-        other ->
-          {:error, {:invalid_event_return, other}}
+        _ ->
+          apply_handle_event(page_module, event, value, merged, state)
       end
     rescue
       exception -> {:error, {exception, __STACKTRACE__}}
     end
+  end
+
+  defp call_handle_event(page_module, event, value, merged) when is_atom(event) do
+    string_event = Atom.to_string(event)
+
+    try do
+      page_module.handle_event(event, value, merged)
+    rescue
+      e in FunctionClauseError ->
+        try do
+          page_module.handle_event(string_event, value, merged)
+        rescue
+          _ in FunctionClauseError -> reraise e, __STACKTRACE__
+        end
+    end
+  end
+
+  defp call_handle_event(page_module, event, value, merged) when is_binary(event) do
+    try do
+      page_module.handle_event(event, value, merged)
+    rescue
+      e in FunctionClauseError ->
+        try do
+          page_module.handle_event(String.to_existing_atom(event), value, merged)
+        rescue
+          _ in [FunctionClauseError, ArgumentError] -> reraise e, __STACKTRACE__
+        end
+    end
+  end
+
+  defp apply_handle_event(page_module, event, value, merged, state) do
+    return = call_handle_event(page_module, event, value, merged)
+
+    case return do
+      {:noreply, new_merged} ->
+        {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+        new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
+        {:ok, new_state}
+
+      {:update, new_merged} ->
+        {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+        new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
+        {:ok, update_page(new_state)}
+
+      {:patch, target, rendered, new_merged} ->
+        {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+        new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
+        html = to_html(rendered)
+        payload = Jason.encode!(%{target: target, html: html})
+        if state.socket_pid, do: send(state.socket_pid, {:send_html, payload})
+        {:ok, new_state}
+
+      {:redirect, path, new_merged} ->
+        {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+        new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
+        {:ok, do_navigate(path, new_state)}
+
+      {:push_event, event_name, event_payload, new_merged} ->
+        {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+        new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
+        new_state = send_push_event(new_state, event_name, event_payload)
+        {:ok, new_state}
+
+      other ->
+        {:error, {:invalid_event_return, other}}
+    end
+  end
+
+  defp apply_set_action(state, action, _merged) do
+    key = to_string(action.name)
+    state = refresh_render_actions(state)
+
+    case Map.fetch(state.set_actions, key) do
+      {:ok, updates} ->
+        merged = merge_for_render(state)
+        new_merged = Map.merge(merged, updates)
+        {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
+        new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
+        {:ok, update_page(new_state)}
+
+      :error ->
+        {:error, :missing_set_action}
+    end
+  end
+
+  defp apply_command_action(state, action, value) do
+    {context_module, command_name} = action.command
+    state = refresh_render_actions(state)
+    bind = runtime_bind(state, action)
+
+    with {:ok, arguments} <- validate_command_arguments(action, value || %{}),
+         {:ok, command} <-
+           Dialup.Command.build(context_module, command_name, bind, arguments),
+         :ok <- dispatch_command(context_module, command) do
+      new_state = state |> remount_page() |> update_page()
+      {:ok, new_state}
+    else
+      {:error, {:invalid_arguments, errors}} ->
+        {:error, {:command_failed, "Invalid arguments: #{inspect(errors)}"}}
+
+      {:error, reason} ->
+        {:error, {:command_failed, Dialup.Command.map_error(action, reason)}}
+    end
+  end
+
+  defp runtime_bind(state, action) do
+    key = to_string(action.name)
+
+    case Map.fetch(state.bind_actions, key) do
+      {:ok, bind} -> bind
+      :error -> Map.get(action, :bind, %{})
+    end
+  end
+
+  defp validate_command_arguments(action, arguments) do
+    clean =
+      Map.drop(arguments, ["_version", :_version, "_dialup_actor", :_dialup_actor])
+
+    case Dialup.Agent.Validator.validate(action, clean) do
+      {:ok, validated} -> {:ok, validated}
+      {:error, errors} -> {:error, {:invalid_arguments, errors}}
+    end
+  end
+
+  defp dispatch_command(context_module, command) do
+    case Code.ensure_loaded(context_module) do
+      {:module, _} ->
+        dispatch_loaded_context(context_module, command)
+
+      {:error, reason} ->
+        {:error, {:invalid_context, reason}}
+    end
+  end
+
+  defp dispatch_loaded_context(context_module, command) do
+    cond do
+      function_exported?(context_module, :dispatch, 1) ->
+        normalize_dispatch_result(context_module.dispatch(command))
+
+      function_exported?(context_module, :dispatch, 2) ->
+        normalize_dispatch_result(context_module.dispatch(command, []))
+
+      true ->
+        {:error, :missing_context_dispatch}
+    end
+  end
+
+  defp normalize_dispatch_result(:ok), do: :ok
+  defp normalize_dispatch_result({:ok, _}), do: :ok
+  defp normalize_dispatch_result({:error, reason}), do: {:error, reason}
+  defp normalize_dispatch_result(other), do: {:error, other}
+
+  defp remount_page(state) do
+    params = state.app_module.path_params(state.path)
+
+    assigns =
+      mount_page(state.path, params, state.session, state.session_keys, state.app_module)
+
+    bump_version(%{state | assigns: assigns})
   end
 
   defp current_page(state), do: state.app_module.page_for(state.path)
@@ -1164,6 +1335,7 @@ defmodule Dialup.UserSessionProcess do
   defp send_push_event(state, event_name, event_payload) do
     if state.socket_pid do
       html = render(state)
+      state = capture_render_actions(state)
 
       payload = %{
         html: html,
@@ -1175,6 +1347,9 @@ defmodule Dialup.UserSessionProcess do
       payload = put_title(payload, state)
       payload = put_ui_lock(payload, state)
       send(state.socket_pid, {:send_html, Jason.encode!(payload)})
+      state
+    else
+      state
     end
   end
 
@@ -1217,7 +1392,7 @@ defmodule Dialup.UserSessionProcess do
       else
         clean_arguments = Map.put(clean_arguments, "_dialup_actor", "agent")
 
-        case apply_event(page_module, action.name, clean_arguments, state) do
+        case apply_declarative_or_legacy(page_module, action, name, clean_arguments, state) do
           {:ok, new_state} ->
             new_state = audit(new_state, token, name, :ok, clean_arguments)
             {{:ok, current_scene(new_state, grant)}, new_state}
@@ -1251,6 +1426,10 @@ defmodule Dialup.UserSessionProcess do
         navigated = audit(navigated, token, name, :ok, %{"path" => path})
         {{:ok, current_scene(navigated, grant)}, navigated}
     end
+  end
+
+  defp apply_declarative_or_legacy(page_module, action, _name, arguments, state) do
+    apply_event(page_module, action.name, arguments, state)
   end
 
   defp check_version(%{require_version: false}, _arguments, _current), do: :ok

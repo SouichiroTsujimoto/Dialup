@@ -1,0 +1,10 @@
+defmodule <%= context_mod %>.Projections.<%= agg_name %>Summary do
+  @moduledoc false
+  use Ecto.Schema
+
+  schema "<%= table_name %>" do
+<%= for field <- all_unique_fields do %>    field :<%= field.name %>, :<%= Mix.Tasks.Dialup.Gen.Aggregate.ecto_type(field.type) %>
+<% end %>    field :status, :string
+    timestamps()
+  end
+end

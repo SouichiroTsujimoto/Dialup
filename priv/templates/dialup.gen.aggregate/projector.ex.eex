@@ -1,0 +1,15 @@
+defmodule <%= context_mod %>.Projectors.<%= agg_name %>Summary do
+  @moduledoc false
+  use Commanded.Event.Handler,
+    application: <%= base_mod %>.CommandedApp,
+    name: __MODULE__
+
+  alias <%= base_mod %>.Repo
+  alias <%= context_mod %>.Projections.<%= agg_name %>Summary
+
+<%= for cmd <- commands do %>  def handle(%<%= context_mod %>.Events.<%= cmd.event_module %>{}, _metadata) do
+    # TODO: update the <%= table_name %> read model
+    :ok
+  end
+
+<% end %>end

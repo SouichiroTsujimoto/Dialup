@@ -1,0 +1,4 @@
+defmodule <%= context_mod %>.Commands.<%= cmd_mod %> do
+  @moduledoc false
+  defstruct [<%= Enum.map(command.fields, & ":#{&1.name}") |> Enum.join(", ") %>]
+end

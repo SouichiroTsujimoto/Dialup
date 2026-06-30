@@ -12,8 +12,17 @@ second API layer.
 <.dialup_action>  ─┐
 declare_action/1   ─┼─→  tools/list  ──→  POST /agent/{token}
 <.dialup_region>   ─┘         │
-declare_region/1              tools/call ──→ handle_event/3 (same session process)
+declare_region/1              tools/call ──→ command / set / navigate / handle_event
 ```
+
+Each declared action carries `_meta.mode`:
+
+| Mode | Server path |
+|------|-------------|
+| `command` | Build Commanded command → `Context.dispatch/1` → remount page |
+| `set` | Merge rendered `set` map into assigns |
+| `navigate` | Navigate to declared path |
+| `action` | Legacy `handle_event/3` |
 
 Human operators use WebSocket (`/ws`). AI agents use HTTP request-response (`POST /agent/:token`).
 Both paths serialize through the same `UserSessionProcess`, so state, versions, and audit logs stay
@@ -272,7 +281,8 @@ returns (`:state`, `:regions`, `:actions`). Revoke with `Dialup.Session.revoke/2
 
 Tool entries include `_meta` for agent decision-making:
 
-- `available` — live predicate from `__available__/2`
+- `mode` — `command`, `set`, `navigate`, or legacy `action`
+- `available` — live predicate derived from `available={...}` / generated `__available__/2`
 - `confirm`, `risk`, `effects`, `reversible`, `idempotent`
 - `examples`, `success`
 
