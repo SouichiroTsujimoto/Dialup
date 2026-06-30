@@ -794,8 +794,38 @@ defmodule Dialup.UserSessionProcess do
     end
   end
 
+  defp call_handle_event(page_module, event, value, merged) when is_atom(event) do
+    string_event = Atom.to_string(event)
+
+    try do
+      page_module.handle_event(event, value, merged)
+    rescue
+      e in FunctionClauseError ->
+        try do
+          page_module.handle_event(string_event, value, merged)
+        rescue
+          _ in FunctionClauseError -> reraise e, __STACKTRACE__
+        end
+    end
+  end
+
+  defp call_handle_event(page_module, event, value, merged) when is_binary(event) do
+    try do
+      page_module.handle_event(event, value, merged)
+    rescue
+      e in FunctionClauseError ->
+        try do
+          page_module.handle_event(String.to_existing_atom(event), value, merged)
+        rescue
+          _ in [FunctionClauseError, ArgumentError] -> reraise e, __STACKTRACE__
+        end
+    end
+  end
+
   defp apply_handle_event(page_module, event, value, merged, state) do
-    case page_module.handle_event(event, value, merged) do
+    return = call_handle_event(page_module, event, value, merged)
+
+    case return do
       {:noreply, new_merged} ->
         {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
         new_state = bump_version(%{state | session: new_session, assigns: new_assigns})

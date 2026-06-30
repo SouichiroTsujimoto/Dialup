@@ -107,6 +107,18 @@ Agent calls are checked server-side against the generated `__available__/2`; the
 buttons. Defining `__available__/2` manually while also using `available={...}` on the same page
 is a compile error.
 
+#### Migrating from hand-written `__available__/2`
+
+1. Copy each predicate from your existing `def __available__(action, assigns)` clauses.
+2. Paste it into `available={...}` on the matching `<.dialup_action>` (use `@assign` syntax in
+   HEEx) or into `declare_action available: quote(do: assigns.field == ...)` for hoisted actions.
+3. Delete the manual `__available__/2` definitions.
+4. Run `mix test`. If both manual and derived availability remain, compilation fails with a
+   clear error pointing at the conflict.
+
+The HTML `available={...}` attribute and the generated server predicate always stay in sync —
+agents see the same gates as humans in the browser.
+
 ### 4. Add regions where meaning must survive layout changes
 
 Use regions for domain objects an agent should refer to by stable name. Include `data` when the
