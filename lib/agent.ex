@@ -146,12 +146,14 @@ defmodule Dialup.Agent do
 
         module = Map.get(action, :module, page_module)
         available = available?(module, action.name, assigns)
+        mode = action_mode(action)
 
         %{
           "name" => name,
           "description" => Map.get(action, :desc, name),
           "inputSchema" => input_schema,
           "_meta" => %{
+            "mode" => to_string(mode),
             "available" => available,
             "navigate" => navigate,
             "confirm" => Map.get(action, :confirm),
@@ -202,6 +204,7 @@ defmodule Dialup.Agent do
           "name" => tool["name"],
           "description" => tool["description"],
           "available" => tool["_meta"]["available"],
+          "mode" => tool["_meta"]["mode"],
           "navigate" => tool["_meta"]["navigate"],
           "confirm" => tool["_meta"]["confirm"],
           "risk" => tool["_meta"]["risk"],
@@ -313,6 +316,11 @@ defmodule Dialup.Agent do
     )
     |> Map.put("protocolGuide", protocol_guide(token))
   end
+
+  defp action_mode(%{navigate: _}), do: "navigate"
+  defp action_mode(%{command: _}), do: "command"
+  defp action_mode(%{set: _}), do: "set"
+  defp action_mode(_), do: "action"
 
   def available?(page_module, action, assigns) do
     if function_exported?(page_module, :__available__, 2),
@@ -475,6 +483,18 @@ defmodule Dialup.Agent do
              "Use the human browser UI.",
            %{"reason" => "human_confirmation_required", "confirm" => "human"}
          )}
+
+      {:error, {:command_failed, message}} when is_binary(message) ->
+        {:ok,
+         tool_error(message, %{
+           "reason" => "command_failed"
+         })}
+
+      {:error, :missing_set_action} ->
+        {:ok,
+         tool_error("Set action is not available in the current render.", %{
+           "reason" => "missing_set_action"
+         })}
 
       {:error, reason} ->
         {:error, -32_603, "Internal error", %{"detail" => Exception.format_exit(reason)}}

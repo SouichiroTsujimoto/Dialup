@@ -1,0 +1,7 @@
+defmodule <%= context_mod %> do
+  @moduledoc false
+  use Dialup.CommandedContext, app: <%= base_mod %>.CommandedApp
+
+<%= for cmd <- commands do %>  alias <%= context_mod %>.Commands.<%= Macro.camelize(cmd.name) %>
+<% end %>
+end

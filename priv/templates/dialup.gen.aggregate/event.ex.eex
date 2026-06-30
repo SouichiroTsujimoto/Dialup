@@ -1,0 +1,5 @@
+defmodule <%= context_mod %>.Events.<%= event_mod %> do
+  @moduledoc false
+  @derive Jason.Encoder
+  defstruct [<%= Enum.map(command.fields, & ":#{&1.name}") |> Enum.join(", ") %>]
+end

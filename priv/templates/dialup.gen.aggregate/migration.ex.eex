@@ -1,0 +1,12 @@
+defmodule <%= "#{base_mod}.Repo.Migrations.Create#{agg_name}Summary" %> do
+  @moduledoc false
+  use Ecto.Migration
+
+  def change do
+    create table(:<%= table_name %>) do
+<%= for field <- all_unique_fields do %>      add :<%= field.name %>, :<%= Mix.Tasks.Dialup.Gen.Aggregate.migration_type(field.type) %>
+<% end %>      add :status, :string
+      timestamps()
+    end
+  end
+end
