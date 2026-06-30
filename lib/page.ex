@@ -58,9 +58,18 @@ defmodule Dialup.Page do
   navigation link agent-operable, declare it with `<.dialup_action navigate="/path">`; the same
   declaration renders the human link and generates the navigation tool.
 
-  Ordinary visible DOM elements remain available for human spatial references, but their
-  generated selectors are less stable than region IDs. See
-  `guides/agent-native-app-development.md` for the complete implementation workflow.
+  ## Action modes
+
+  Each `<.dialup_action>` uses exactly one mode:
+
+  | Mode | Attribute | Routing |
+  |------|-----------|---------|
+  | `command` | `command={{Context, :cmd}}` | Build Commanded command → `Context.dispatch/1` → remount |
+  | `set` | `set={%{key: value}}` | Merge rendered map into assigns (inline HEEx only) |
+  | `navigate` | `navigate="/path"` | Navigate to declared path |
+  | `action` | `name={:event}` | Legacy `handle_event/3` |
+
+  See `guides/agent-native-app-development.md` for Commanded integration and availability derivation.
 
   ## Return values for `handle_event/3` and `handle_info/2`
 

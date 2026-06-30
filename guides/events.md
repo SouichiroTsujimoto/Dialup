@@ -2,6 +2,11 @@
 
 クライアント側のイベントをサーバーで処理する方法。
 
+> **エージェント公開の state 変更:** HTTP MCP tool として公開する操作は
+> `<.dialup_action command={...}>` または inline `set={...}` を優先してください。
+> legacy モード（`name={:event}`）のみ `handle_event/3` に委譲されます。
+> 詳細は [Building agent-native applications](./agent-native-app-development.md) を参照。
+
 ## イベントの流れ
 
 ```

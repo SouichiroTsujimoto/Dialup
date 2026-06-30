@@ -180,9 +180,10 @@ h1 { font-size: 3rem; }|
     <h2>次のステップ</h2>
     <ul>
       <li><.dialup_action navigate="/agent_demo" class="inline-link">MCP Live Demo</.dialup_action> — UI から自動生成される HTTP JSON-RPC を体験</li>
-      <li><.dialup_action navigate="/docs/concepts" class="inline-link">アーキテクチャとライフサイクル</.dialup_action>を理解する</li>
-      <li><.dialup_action navigate="/docs/api" class="inline-link">API リファレンス</.dialup_action>で使える機能を確認する</li>
+      <li><.dialup_action navigate="/docs/concepts" class="inline-link">アーキテクチャとライフサイクル</.dialup_action>を理解する（command / set / navigate モード含む）</li>
+      <li><.dialup_action navigate="/docs/api" class="inline-link">API リファレンス</.dialup_action>で Action モードと MCP tools を確認する</li>
       <li><.dialup_action navigate="/demo" class="inline-link">UI Demo</.dialup_action> でリアルタイム UI を確認する</li>
+      <li>Commanded 連携の詳細は Hex ガイド <em>Building agent-native applications</em></li>
     </ul>
     </div>
     """

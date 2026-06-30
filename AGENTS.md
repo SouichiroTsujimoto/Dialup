@@ -13,10 +13,12 @@ separate agent API or duplicate business logic. UI declarations become HTTP MCP 
 For agent-enabled pages:
 
 - declare state-changing operations with `<.dialup_action>` / `declare_action/1`;
-- implement them once in `handle_event/3`;
+- prefer `command={...}` (Commanded dispatch + remount) or inline `set={...}` for UI-only state;
+  use `handle_event/3` only for legacy `name={:event}` actions or non-declarative controls;
 - expose navigation with `<.dialup_action navigate="/path">` (on a page or a layout) so the agent
   reaches exactly the links the UI declares — raw `ws-href`/`ws-event` are never auto-exposed;
-- add `__available__/2` predicates for live server-side availability;
+- derive availability with `available={...}` on actions (or `declare_action available: quote(...)`);
+  avoid hand-written `__available__/2` when using declarative availability;
 - use `<.dialup_region>` for stable domain areas and structured data;
 - expose an allowlisted projection through `agent_state/1`;
 - explain goals and safety through `agent_message/1`;
