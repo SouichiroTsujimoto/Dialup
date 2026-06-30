@@ -30,16 +30,7 @@ defmodule Dialup.App.AgentDemo.Page do
 
   def page_title(_assigns), do: "AIにバトンタッチ — Dialup MCP Demo"
 
-  def mount(_params, assigns) do
-    {:ok,
-     assigns
-     |> Map.merge(%{
-       project: "社内勉強会の企画",
-       tasks: [],
-       next_id: 1,
-       handoff: nil
-     })}
-  end
+  def mount(_params, assigns), do: {:ok, assigns}
 
   def agent_state(assigns) do
     %{
@@ -180,6 +171,8 @@ defmodule Dialup.App.AgentDemo.Page do
           人間が触っているこのタスクボードを、AI Agent に渡して続きを任せられます。
           AI は <code>POST /agent/:token</code> の HTTP MCP で操作し、
           あなたのブラウザは WebSocket でリアルタイムに更新されます。
+          AI が先に headless で始める場合は <code>issue_browser_url</code> で参加用リンクを発行し、
+          人間側は WebSocket attach のあと <code>POST /_dialup/finalize-join</code> で join が完了します。
         </p>
       </header>
 

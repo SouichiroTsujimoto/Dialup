@@ -105,6 +105,19 @@ params:   新しいURLのパラメータに更新
 
 session をリセットしたい場合は、`handle_event` や `layout.mount` 内で明示的に行う。
 
+### ネスト layout の session マージ
+
+初回接続では、ルートに含まれる **すべて** の layout の `mount/1` が親→子の順で実行されます。
+
+ページ遷移時は session 全体を保持しつつ、**遷移先パスに初めて現れる layout だけ** `mount/1`
+を呼びます。各 layout が返すキーのうち、まだ session に無いものだけが `Map.put_new` で追加されます。
+すでにマウント済みの layout は再実行されないため、PubSub 購読などの副作用が毎回走ることはありません。
+
+```elixir
+# 例: /app → /app/settings（settings 配下にだけ Settings.Layout がある）
+# Settings.Layout.mount/1 は初回遷移時のみ実行され、:settings_theme などが追加される
+```
+
 ## 状態の揮発性
 
 assigns・session はメモリ上に保持される。以下の場合に失われる：

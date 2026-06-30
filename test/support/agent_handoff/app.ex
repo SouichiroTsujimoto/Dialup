@@ -1,14 +1,17 @@
 defmodule Dialup.AgentHandoffTest.App do
+  alias Dialup.AgentHandoffTest.BoardLayout
   alias Dialup.AgentHandoffTest.BoardPage
+  alias Dialup.AgentHandoffTest.BoomPage
   alias Dialup.AgentHandoffTest.Layout
   alias Dialup.AgentHandoffTest.Page
 
   def page_for("/"), do: Page
   def page_for("/board"), do: BoardPage
+  def page_for("/boom"), do: BoomPage
   def page_for(_path), do: nil
   def path_params(_path), do: %{}
   def layouts_for("/"), do: [Layout]
-  def layouts_for("/board"), do: [Layout]
+  def layouts_for("/board"), do: [Layout, BoardLayout]
   def layouts_for(_path), do: []
   def error_page_for(_path), do: nil
 
@@ -16,7 +19,10 @@ defmodule Dialup.AgentHandoffTest.App do
     do: {:ok, Dialup.Router.render_with_layouts(Page, [Layout], assigns)}
 
   def dispatch("/board", assigns),
-    do: {:ok, Dialup.Router.render_with_layouts(BoardPage, [Layout], assigns)}
+    do: {:ok, Dialup.Router.render_with_layouts(BoardPage, [Layout, BoardLayout], assigns)}
+
+  def dispatch("/boom", assigns),
+    do: {:ok, Dialup.Router.render_with_layouts(BoomPage, [Layout], assigns)}
 
   def dispatch(_path, _assigns), do: {:error, :not_found}
   def __session_store__, do: :memory

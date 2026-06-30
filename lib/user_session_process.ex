@@ -3,6 +3,16 @@ defmodule Dialup.UserSessionProcess do
   use GenServer
 
   @session_timeout :timer.minutes(5)
+  @headless_timeout :timer.minutes(15)
+  @browser_token_ttl :timer.minutes(5)
+  @browser_join_reservation_ttl :timer.seconds(30)
+  @pending_finalize_ttl :timer.seconds(30)
+
+  # Browser join state machine (single completion point):
+  #   attach  -> WS join reserves token, sets pending_finalize, starts TTL timer
+  #   complete -> POST finalize-join consumes token, clears pending_finalize, sets cookie
+  #   rollback -> WS close or TTL before complete restores headless session
+  # After complete, __reconnect only refreshes the live socket; authorization is already done.
 
   # DynamicSupervisor から起動される（引数はタプル）
   # registry_key: タブごとの一意キー（tab_id || session_id）
@@ -20,7 +30,8 @@ defmodule Dialup.UserSessionProcess do
   def navigate(pid, path), do: GenServer.cast(pid, {:navigate, path})
   def event(pid, event, value), do: GenServer.cast(pid, {:event, event, value})
   def session_id(pid), do: GenServer.call(pid, :get_session_id)
-  def take_over(pid, new_socket_pid), do: GenServer.cast(pid, {:take_over, new_socket_pid})
+  def take_over(pid, new_socket_pid, tab_id \\ nil),
+    do: GenServer.call(pid, {:take_over, new_socket_pid, tab_id})
   def reconnect(pid, path), do: GenServer.cast(pid, {:reconnect, path})
   def agent_describe(pid, token), do: GenServer.call(pid, {:agent_describe, token})
   def agent_tools(pid, token), do: GenServer.call(pid, {:agent_tools, token})
@@ -31,6 +42,53 @@ defmodule Dialup.UserSessionProcess do
   def revoke_agent(pid, token), do: GenServer.call(pid, {:agent_revoke, token})
   def issue_agent_grant(pid, opts), do: GenServer.call(pid, {:agent_grant, opts})
   def issue_browser_handoff(pid), do: GenServer.call(pid, :issue_browser_handoff)
+  def browser_join(pid, new_socket_pid, tab_id \\ nil),
+    do: GenServer.call(pid, {:browser_join, new_socket_pid, tab_id})
+
+  def browser_join_with_token(pid, new_socket_pid, tab_id, token),
+    do: GenServer.call(pid, {:browser_join_with_token, new_socket_pid, tab_id, token})
+
+  def reserve_browser_join_token(pid, token, tab_id),
+    do: GenServer.call(pid, {:reserve_browser_join_token, token, tab_id})
+
+  def release_browser_join_reservation(pid, token),
+    do: GenServer.call(pid, {:release_browser_join_reservation, token})
+
+  def finalize_browser_join(pid, tab_id, nonce),
+    do: GenServer.call(pid, {:finalize_browser_join, tab_id, nonce})
+
+  def rollback_browser_join(pid),
+    do: GenServer.call(pid, :rollback_browser_join)
+
+  def issue_browser_token(pid), do: GenServer.call(pid, :issue_browser_token)
+
+  def consume_browser_token(pid, token),
+    do: GenServer.call(pid, {:consume_browser_token, token})
+
+  def browser_token_active?(pid, token),
+    do: GenServer.call(pid, {:browser_token_active?, token})
+
+  def awaiting_browser_join?(pid), do: GenServer.call(pid, :awaiting_browser_join?)
+
+  def start_headless(app_module, path, _opts \\ %{}) do
+    session_id = random_id()
+    registry_key = "headless-" <> random_id()
+
+    {:ok, pid} =
+      DynamicSupervisor.start_child(
+        Dialup.SessionSupervisor,
+        {__MODULE__, {nil, app_module, session_id, registry_key}}
+      )
+
+    case GenServer.call(pid, {:init_sync, path}) do
+      {:ok, descriptor} ->
+        {:ok, Map.put(descriptor, "sessionId", session_id)}
+
+      error ->
+        _ = DynamicSupervisor.terminate_child(Dialup.SessionSupervisor, pid)
+        error
+    end
+  end
 
   @impl GenServer
   def init(%{
@@ -40,10 +98,17 @@ defmodule Dialup.UserSessionProcess do
         registry_key: registry_key
       }) do
     {:ok, _} = Registry.register(Dialup.SessionRegistry, registry_key, nil)
+
     agent_token = :crypto.strong_rand_bytes(24) |> Base.url_encode64(padding: false)
     {:ok, _} = Registry.register(Dialup.SessionRegistry, {:agent_token, agent_token}, nil)
     {:ok, agent_proxy} = Dialup.Agent.RegistryProxy.start_link(self(), agent_token)
-    ref = Process.monitor(socket_pid)
+
+    {ref, timeout_ref} =
+      if socket_pid do
+        {Process.monitor(socket_pid), nil}
+      else
+        {nil, Process.send_after(self(), :session_timeout, @headless_timeout)}
+      end
 
     base_state = %{
       path: nil,
@@ -52,16 +117,21 @@ defmodule Dialup.UserSessionProcess do
       session_id: session_id,
       session: %{},
       session_keys: MapSet.new(),
+      mounted_layouts: MapSet.new(),
       assigns: %{},
       params: %{},
       subscriptions: [],
       monitor_ref: ref,
-      timeout_ref: nil,
+      timeout_ref: timeout_ref,
       agent_token: agent_token,
       agent_grants: %{
         agent_token => Dialup.Agent.Grant.new(agent_token, %{expires_in: :infinity})
       },
       agent_proxies: %{agent_token => agent_proxy},
+      browser_tokens: %{},
+      headless: is_nil(socket_pid),
+      pending_finalize: nil,
+      pending_finalize_timeout_ref: nil,
       version: 0,
       audit_log: [],
       ui_locked: false,
@@ -75,11 +145,13 @@ defmodule Dialup.UserSessionProcess do
         case Dialup.SessionStore.restore(session_id) do
           {:ok, %{session: session, assigns: assigns, path: path}} ->
             session_keys = MapSet.new(Map.keys(session))
+            mounted_layouts = app_module.layouts_for(path) |> MapSet.new()
 
             %{
               base_state
               | session: session,
                 session_keys: session_keys,
+                mounted_layouts: mounted_layouts,
                 assigns: assigns,
                 path: path
             }
@@ -99,7 +171,121 @@ defmodule Dialup.UserSessionProcess do
     {:reply, state.session_id, state}
   end
 
+  @impl GenServer
+  def handle_call({:take_over, new_socket_pid, tab_id}, _from, state) do
+    if state.monitor_ref, do: Process.demonitor(state.monitor_ref, [:flush])
+    if state.timeout_ref, do: Process.cancel_timer(state.timeout_ref)
+    ref = Process.monitor(new_socket_pid)
+
+    case register_tab_registry(tab_id) do
+      :ok ->
+        {:reply, :ok, %{state | socket_pid: new_socket_pid, monitor_ref: ref, timeout_ref: nil}}
+
+      {:error, :tab_id_in_use} ->
+        {:reply, {:error, :tab_id_in_use}, state}
+    end
+  end
+
+  def handle_call({:browser_join, new_socket_pid, tab_id}, _from, state) do
+    case do_browser_join(state, new_socket_pid, tab_id) do
+      {:ok, new_state} -> {:reply, :ok, new_state}
+      {:error, _} -> {:reply, {:error, :invalid_token}, state}
+    end
+  end
+
+  def handle_call({:browser_join_with_token, new_socket_pid, tab_id, token}, _from, state) do
+    cond do
+      not is_binary(tab_id) or tab_id == "" ->
+        {:reply, {:error, :invalid_token}, state}
+
+      join_blocks_token?(state, token) ->
+        {:reply, {:error, :already_joined}, state}
+
+      true ->
+        with :ok <- verify_reserved_tab_id(state, token, tab_id),
+             {:ok, joined_state} <- do_browser_join(state, new_socket_pid, tab_id, token) do
+          {:reply, :ok, joined_state}
+        else
+          _ -> {:reply, {:error, :invalid_token}, state}
+        end
+    end
+  end
+
+  def handle_call({:finalize_browser_join, tab_id, nonce}, _from, state) do
+    case state.pending_finalize do
+      %{tab_id: ^tab_id, nonce: ^nonce, token: token} ->
+        with {:ok, new_state} <- consume_browser_token_entry(state, token) do
+          {:reply, :ok,
+           new_state
+           |> cancel_pending_finalize_timeout()
+           |> Map.put(:pending_finalize, nil)}
+        else
+          _ -> {:reply, {:error, :invalid_finalize}, state}
+        end
+
+      _ ->
+        {:reply, {:error, :invalid_finalize}, state}
+    end
+  end
+
+  def handle_call(:rollback_browser_join, _from, %{pending_finalize: nil} = state) do
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:rollback_browser_join, _from, state) do
+    {:reply, :ok, rollback_pending_browser_join(state)}
+  end
+
+  def handle_call({:release_browser_join_reservation, token}, _from, state) do
+    case Map.fetch(state.browser_tokens, token) do
+      {:ok, %{reserved_at: _} = entry} ->
+        released = entry |> Map.delete(:reserved_at) |> Map.delete(:reserved_tab_id)
+
+        {:reply, :ok,
+         %{state | browser_tokens: Map.put(state.browser_tokens, token, released)}}
+
+      _ ->
+        {:reply, {:error, :not_reserved}, state}
+    end
+  end
+
+  def handle_call({:reserve_browser_join_token, token, tab_id}, _from, state) do
+    if not is_binary(tab_id) or tab_id == "" do
+      {:reply, {:error, :invalid_token}, state}
+    else
+      case Map.fetch(state.browser_tokens, token) do
+      {:ok, entry} ->
+        entry = clear_expired_reservation(entry)
+        state = put_browser_token(state, token, entry)
+
+        cond do
+          not browser_token_active?(entry) ->
+            {:reply, {:error, :invalid_token}, state}
+
+          join_blocks_token?(state, token) ->
+            {:reply, {:error, :already_joined}, state}
+
+          reserved?(entry) ->
+            {:reply, {:error, :already_reserved}, state}
+
+          true ->
+            reserved =
+              entry
+              |> Map.put(:reserved_at, System.monotonic_time(:millisecond))
+              |> Map.put(:reserved_tab_id, tab_id)
+
+            {:reply, {:ok, state.session_id}, put_browser_token(state, token, reserved)}
+        end
+
+      :error ->
+        {:reply, {:error, :invalid_token}, state}
+    end
+    end
+  end
+
   def handle_call({:agent_describe, token}, _from, state) do
+    state = touch_headless_timeout(state)
+
     case fetch_grant(state, token) do
       {:ok, grant} ->
         page_module = current_page(state)
@@ -136,6 +322,8 @@ defmodule Dialup.UserSessionProcess do
   end
 
   def handle_call({:agent_tools, token}, _from, state) do
+    state = touch_headless_timeout(state)
+
     result =
       with {:ok, grant} <- fetch_grant(state, token) do
         tools =
@@ -159,6 +347,8 @@ defmodule Dialup.UserSessionProcess do
   end
 
   def handle_call({:agent_call, token, "read_scene", _arguments}, _from, state) do
+    state = touch_headless_timeout(state)
+
     case fetch_grant(state, token) do
       {:ok, grant} ->
         {:reply, {:ok, current_scene(state, grant)}, audit(state, token, "read_scene", :ok)}
@@ -169,6 +359,8 @@ defmodule Dialup.UserSessionProcess do
   end
 
   def handle_call({:agent_call, token, "read_audit_log", _arguments}, _from, state) do
+    state = touch_headless_timeout(state)
+
     case fetch_grant(state, token) do
       {:ok, grant} ->
         if Dialup.Agent.Grant.allows?(grant, "read_audit_log") do
@@ -184,6 +376,8 @@ defmodule Dialup.UserSessionProcess do
   end
 
   def handle_call({:agent_call, token, "lock_ui", arguments}, _from, state) do
+    state = touch_headless_timeout(state)
+
     case fetch_grant(state, token) do
       {:ok, grant} ->
         if Dialup.Agent.Grant.allows?(grant, "lock_ui") do
@@ -202,6 +396,8 @@ defmodule Dialup.UserSessionProcess do
   end
 
   def handle_call({:agent_call, token, "unlock_ui", _arguments}, _from, state) do
+    state = touch_headless_timeout(state)
+
     case fetch_grant(state, token) do
       {:ok, grant} ->
         if Dialup.Agent.Grant.allows?(grant, "lock_ui") do
@@ -218,7 +414,31 @@ defmodule Dialup.UserSessionProcess do
     end
   end
 
+  def handle_call({:agent_call, token, "issue_browser_url", _arguments}, _from, state) do
+    state = touch_headless_timeout(state)
+
+    case fetch_grant(state, token) do
+      {:ok, grant} ->
+        if Dialup.Agent.Grant.allows?(grant, "issue_browser_url") do
+          case create_browser_token(state) do
+            {:ok, result, new_state} ->
+              new_state = audit(new_state, token, "issue_browser_url", :ok)
+              {:reply, {:ok, result}, new_state}
+
+            error ->
+              {:reply, error, state}
+          end
+        else
+          {:reply, {:error, :forbidden}, state}
+        end
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
   def handle_call({:agent_call, token, name, arguments}, _from, state) do
+    state = touch_headless_timeout(state)
     {reply, new_state} = invoke_agent_action(state, token, name, arguments)
     {:reply, reply, new_state}
   end
@@ -235,11 +455,14 @@ defmodule Dialup.UserSessionProcess do
   end
 
   def handle_call({:agent_grant, opts}, _from, state) do
+    state = touch_headless_timeout(state)
     {reply, state} = create_agent_grant(state, opts)
     {:reply, reply, state}
   end
 
   def handle_call(:issue_browser_handoff, _from, state) do
+    state = touch_headless_timeout(state)
+
     case current_page(state) do
       nil ->
         {:reply, {:error, :not_ready}, state}
@@ -251,35 +474,63 @@ defmodule Dialup.UserSessionProcess do
     end
   end
 
+  def handle_call(:issue_browser_token, _from, state) do
+    case create_browser_token(state) do
+      {:ok, result, new_state} -> {:reply, {:ok, result}, new_state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:consume_browser_token, token}, _from, state) do
+    case consume_browser_token_entry(state, token) do
+      {:ok, new_state} -> {:reply, :ok, new_state}
+      :error -> {:reply, {:error, :expired}, state}
+    end
+  end
+
+  def handle_call(:awaiting_browser_join?, _from, state) do
+    {:reply, awaiting_browser_join_state?(state), state}
+  end
+
+  def handle_call({:browser_token_active?, token}, _from, state) do
+    active? =
+      case Map.fetch(state.browser_tokens, token) do
+        {:ok, entry} ->
+          entry = clear_expired_reservation(entry)
+          browser_token_active?(entry) and not reserved?(entry)
+
+        :error ->
+          false
+      end
+
+    {:reply, active?, state}
+  end
+
+  def handle_call({:init_sync, path}, _from, state) do
+    case do_init(path, state) do
+      {:ok, new_state} ->
+        grant = Map.fetch!(new_state.agent_grants, new_state.agent_token)
+
+        {:reply,
+         {:ok,
+          %{
+            "token" => new_state.agent_token,
+            "endpoint" => Dialup.Agent.endpoint(new_state.agent_token),
+            "grant" => Dialup.Agent.Grant.public(grant),
+            "path" => new_state.path
+          }}, new_state}
+
+      {:error, reason, new_state} ->
+        {:reply, {:error, reason}, new_state}
+    end
+  end
+
   # 初回接続：layout.mount → session、page.mount → assigns
   @impl GenServer
   def handle_cast({:init, path}, state) do
-    try do
-      params = state.app_module.path_params(path)
-      Process.put(:dialup_subscriptions, [])
-      {session, session_keys} = mount_session(path, state.app_module)
-      assigns = mount_page(path, params, session, session_keys, state.app_module)
-      subs = Process.get(:dialup_subscriptions, [])
-
-      new_state =
-        %{
-          state
-          | path: path,
-            params: params,
-            session: session,
-            session_keys: session_keys,
-            assigns: assigns,
-            subscriptions: subs
-        }
-        |> configure_primary_grant()
-        |> update_page()
-
-      {:noreply, new_state}
-    rescue
-      e ->
-        new_state = %{state | path: path}
-        send_error(new_state, e, __STACKTRACE__)
-        {:noreply, new_state}
+    case do_init(path, state) do
+      {:ok, new_state} -> {:noreply, new_state}
+      {:error, _reason, new_state} -> {:noreply, new_state}
     end
   end
 
@@ -290,7 +541,7 @@ defmodule Dialup.UserSessionProcess do
       try do
         Process.put(:dialup_subscriptions, [])
         params = state.app_module.path_params(path)
-        {session, session_keys} = mount_session(path, state.app_module)
+        {session, session_keys, mounted_layouts} = mount_session(path, state.app_module)
         assigns = mount_page(path, params, session, session_keys, state.app_module)
         subs = Process.get(:dialup_subscriptions, [])
 
@@ -301,6 +552,7 @@ defmodule Dialup.UserSessionProcess do
               params: params,
               session: session,
               session_keys: session_keys,
+              mounted_layouts: mounted_layouts,
               assigns: assigns,
               subscriptions: subs
           }
@@ -320,14 +572,6 @@ defmodule Dialup.UserSessionProcess do
   end
 
   # 再接続時のsocket_pid引き継ぎ
-  @impl GenServer
-  def handle_cast({:take_over, new_socket_pid}, state) do
-    if state.monitor_ref, do: Process.demonitor(state.monitor_ref, [:flush])
-    if state.timeout_ref, do: Process.cancel_timer(state.timeout_ref)
-    ref = Process.monitor(new_socket_pid)
-    {:noreply, %{state | socket_pid: new_socket_pid, monitor_ref: ref, timeout_ref: nil}}
-  end
-
   @impl GenServer
   def handle_cast({:event, _event, _value}, %{ui_locked: true} = state) do
     # UI is locked by an agent; ignore human interactions and re-assert the
@@ -403,6 +647,18 @@ defmodule Dialup.UserSessionProcess do
     {:noreply, %{state | socket_pid: nil, monitor_ref: nil, timeout_ref: timeout_ref}}
   end
 
+  def handle_info({:pending_finalize_timeout, nonce}, state) do
+    case state.pending_finalize do
+      %{nonce: ^nonce} ->
+        if state.socket_pid, do: send(state.socket_pid, :dialup_close_pending_join)
+
+        {:noreply, state |> cancel_pending_finalize_timeout() |> rollback_pending_browser_join()}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(:session_timeout, state) do
     if uses_ets_store?(state.app_module) and state.path do
       Dialup.SessionStore.save(state.session_id, state.session, state.assigns, state.path)
@@ -472,11 +728,21 @@ defmodule Dialup.UserSessionProcess do
 
       Process.put(:dialup_subscriptions, [])
       params = state.app_module.path_params(path)
-      assigns = mount_page(path, params, state.session, state.session_keys, state.app_module)
+      {session, session_keys, mounted_layouts} = merge_session_for(path, state)
+      assigns = mount_page(path, params, session, session_keys, state.app_module)
       subs = Process.get(:dialup_subscriptions, [])
 
       result =
-        %{state | path: path, params: params, assigns: assigns, subscriptions: subs}
+        %{
+          state
+          | path: path,
+            params: params,
+            session: session,
+            session_keys: session_keys,
+            mounted_layouts: mounted_layouts,
+            assigns: assigns,
+            subscriptions: subs
+        }
         |> configure_primary_grant()
         |> update_page()
 
@@ -650,12 +916,35 @@ defmodule Dialup.UserSessionProcess do
   # layout.mount を順番に呼び、session と session_keys を構築する
   # 親レイアウトの結果が子レイアウトの mount に渡される
   defp mount_session(path, app_module) do
-    layouts = app_module.layouts_for(path)
+    {session, session_keys} = Dialup.Router.mount_session(app_module, path)
+    mounted_layouts = app_module.layouts_for(path) |> MapSet.new()
+    {session, session_keys, mounted_layouts}
+  end
 
-    Enum.reduce(layouts, {%{}, MapSet.new()}, fn layout_mod, {session, keys} ->
-      {:ok, new_session} = layout_mod.mount(session)
-      new_keys = MapSet.new(Map.keys(new_session))
-      {new_session, MapSet.union(keys, new_keys)}
+  # 遷移先レイアウトが導入する session キーを差分マウントする。既存キーの値は上書きしない。
+  defp merge_session_for(path, state) do
+    layouts = state.app_module.layouts_for(path)
+
+    Enum.reduce(layouts, {state.session, state.session_keys, state.mounted_layouts}, fn layout_mod,
+                                                                                        {session,
+                                                                                         keys,
+                                                                                         mounted} ->
+      if MapSet.member?(mounted, layout_mod) do
+        {session, keys, mounted}
+      else
+        {:ok, fresh_session} = layout_mod.mount(session)
+        new_keys = MapSet.new(Map.keys(fresh_session))
+        added_keys = MapSet.difference(new_keys, keys)
+
+        merged =
+          added_keys
+          |> MapSet.to_list()
+          |> Enum.reduce(session, fn k, acc ->
+            Map.put_new(acc, k, Map.get(fresh_session, k))
+          end)
+
+        {merged, MapSet.union(keys, new_keys), MapSet.put(mounted, layout_mod)}
+      end
     end)
   end
 
@@ -755,6 +1044,24 @@ defmodule Dialup.UserSessionProcess do
     |> IO.iodata_to_binary()
   end
 
+  defp verify_reserved_tab_id(state, token, tab_id) do
+    case Map.fetch(state.browser_tokens, token) do
+      {:ok, entry} ->
+        entry = clear_expired_reservation(entry)
+
+        case entry do
+          %{reserved_tab_id: reserved_tab_id} when is_binary(reserved_tab_id) ->
+            if reserved?(entry) and reserved_tab_id == tab_id, do: :ok, else: {:error, :invalid_token}
+
+          _ ->
+            :ok
+        end
+
+      :error ->
+        {:error, :invalid_token}
+    end
+  end
+
   defp update_page(state) do
     state =
       if state.socket_pid do
@@ -764,6 +1071,7 @@ defmodule Dialup.UserSessionProcess do
         payload = %{html: html, path: state.path}
         payload = put_title(payload, state)
         payload = put_ui_lock(payload, state)
+        payload = put_finalize_nonce(payload, state)
         send(state.socket_pid, {:send_html, Jason.encode!(payload)})
         state
       else
@@ -772,6 +1080,12 @@ defmodule Dialup.UserSessionProcess do
 
     state
   end
+
+  defp put_finalize_nonce(payload, %{pending_finalize: %{nonce: nonce}}) do
+    Map.put(payload, :join_finalize_nonce, nonce)
+  end
+
+  defp put_finalize_nonce(payload, _state), do: payload
 
   defp put_ui_lock(payload, state) do
     payload
@@ -1180,4 +1494,246 @@ defmodule Dialup.UserSessionProcess do
 
   defp json_safe_value(value) when is_list(value), do: Enum.map(value, &json_safe_value/1)
   defp json_safe_value(value), do: value
+
+  defp do_init(path, state) do
+    try do
+      params = state.app_module.path_params(path)
+      Process.put(:dialup_subscriptions, [])
+      {session, session_keys, mounted_layouts} = mount_session(path, state.app_module)
+      assigns = mount_page(path, params, session, session_keys, state.app_module)
+      subs = Process.get(:dialup_subscriptions, [])
+
+      new_state =
+        %{
+          state
+          | path: path,
+            params: params,
+            session: session,
+            session_keys: session_keys,
+            mounted_layouts: mounted_layouts,
+            assigns: assigns,
+            subscriptions: subs
+        }
+        |> configure_primary_grant()
+        |> update_page()
+
+      {:ok, new_state}
+    rescue
+      e ->
+        new_state = %{state | path: path}
+        send_error(new_state, e, __STACKTRACE__)
+        {:error, :init_failed, new_state}
+    end
+  end
+
+  defp touch_headless_timeout(%{headless: true, socket_pid: nil} = state) do
+    if state.timeout_ref, do: Process.cancel_timer(state.timeout_ref)
+    timeout_ref = Process.send_after(self(), :session_timeout, @headless_timeout)
+    %{state | timeout_ref: timeout_ref}
+  end
+
+  defp touch_headless_timeout(state), do: state
+
+  defp create_browser_token(%{path: nil}), do: {:error, :not_ready}
+
+  defp create_browser_token(state) do
+    token = random_id()
+    {:ok, _} = Registry.register(Dialup.SessionRegistry, {:browser_token, token}, nil)
+    entry = browser_token_entry(token)
+    browser_url = browser_join_url(state.path, token)
+
+    {:ok,
+     %{
+       "browserToken" => token,
+       "browserUrl" => browser_url,
+       "expiresInMs" => @browser_token_ttl
+     }, %{state | browser_tokens: Map.put(state.browser_tokens, token, entry)}}
+  end
+
+  defp browser_join_url(path, token) do
+    separator = if String.contains?(path, "?"), do: "&", else: "?"
+    path <> separator <> "_join=" <> URI.encode_www_form(token)
+  end
+
+  defp do_browser_join(state, new_socket_pid, tab_id, join_token \\ nil) do
+    if is_binary(join_token) and (not is_binary(tab_id) or tab_id == "") do
+      {:error, :invalid_token}
+    else
+      do_browser_join!(state, new_socket_pid, tab_id, join_token)
+    end
+  end
+
+  defp do_browser_join!(state, new_socket_pid, tab_id, join_token) do
+    with :ok <- register_tab_registry(tab_id),
+         :ok <- register_registry_key(state.session_id) do
+      do_browser_join_attached!(state, new_socket_pid, tab_id, join_token)
+    else
+      {:error, :tab_id_in_use} -> {:error, :invalid_token}
+    end
+  end
+
+  defp do_browser_join_attached!(state, new_socket_pid, tab_id, join_token) do
+    if state.monitor_ref, do: Process.demonitor(state.monitor_ref, [:flush])
+    if state.timeout_ref, do: Process.cancel_timer(state.timeout_ref)
+    ref = Process.monitor(new_socket_pid)
+
+    pending_finalize =
+      if is_binary(tab_id) and tab_id != "" and is_binary(join_token) do
+        %{tab_id: tab_id, nonce: random_id(), token: join_token}
+      end
+
+    new_state =
+      state
+      |> Map.put(:socket_pid, new_socket_pid)
+      |> Map.put(:monitor_ref, ref)
+      |> Map.put(:timeout_ref, nil)
+      |> Map.put(:headless, false)
+      |> Map.put(:pending_finalize, pending_finalize)
+      |> schedule_pending_finalize_timeout()
+      |> update_page()
+      |> audit(:human, "browser_join", :ok)
+
+    {:ok, new_state}
+  end
+
+  defp register_tab_registry(tab_id) when is_binary(tab_id) and tab_id != "" do
+    register_registry_key(tab_id)
+  end
+
+  defp register_tab_registry(_tab_id), do: :ok
+
+  defp schedule_pending_finalize_timeout(%{pending_finalize: %{nonce: nonce}} = state) do
+    ref = Process.send_after(self(), {:pending_finalize_timeout, nonce}, @pending_finalize_ttl)
+    %{state | pending_finalize_timeout_ref: ref}
+  end
+
+  defp schedule_pending_finalize_timeout(state), do: state
+
+  defp cancel_pending_finalize_timeout(%{pending_finalize_timeout_ref: ref} = state)
+       when not is_nil(ref) do
+    Process.cancel_timer(ref)
+    %{state | pending_finalize_timeout_ref: nil}
+  end
+
+  defp cancel_pending_finalize_timeout(state), do: state
+
+  defp rollback_pending_browser_join(%{pending_finalize: nil} = state), do: state
+
+  defp rollback_pending_browser_join(%{pending_finalize: %{tab_id: tab_id, token: token}} = state) do
+    state = cancel_pending_finalize_timeout(state)
+
+    if state.monitor_ref, do: Process.demonitor(state.monitor_ref, [:flush])
+
+    if is_binary(tab_id) and tab_id != "" do
+      Registry.unregister(Dialup.SessionRegistry, tab_id)
+    end
+
+    Registry.unregister(Dialup.SessionRegistry, state.session_id)
+
+    released =
+      case Map.fetch(state.browser_tokens, token) do
+        {:ok, %{reserved_at: _} = entry} ->
+          entry |> Map.delete(:reserved_at) |> Map.delete(:reserved_tab_id)
+
+        _ ->
+          nil
+      end
+
+    browser_tokens =
+      if released, do: Map.put(state.browser_tokens, token, released), else: state.browser_tokens
+
+    if state.timeout_ref, do: Process.cancel_timer(state.timeout_ref)
+    timeout_ref = Process.send_after(self(), :session_timeout, @headless_timeout)
+
+    %{
+      state
+      | socket_pid: nil,
+        monitor_ref: nil,
+        timeout_ref: timeout_ref,
+        headless: true,
+        pending_finalize: nil,
+        pending_finalize_timeout_ref: nil,
+        browser_tokens: browser_tokens
+    }
+  end
+
+  defp consume_browser_token_entry(state, token) do
+    case Map.fetch(state.browser_tokens, token) do
+      {:ok, entry} ->
+        if browser_token_active?(entry) do
+          Registry.unregister(Dialup.SessionRegistry, {:browser_token, token})
+
+          consumed =
+            Map.put(entry, :consumed_at, System.monotonic_time(:millisecond))
+
+          {:ok, %{state | browser_tokens: Map.put(state.browser_tokens, token, consumed)}}
+        else
+          :error
+        end
+
+      :error ->
+        :error
+    end
+  end
+
+  defp awaiting_browser_join_state?(state) do
+    state.headless and is_nil(state.socket_pid)
+  end
+
+  defp put_browser_token(state, token, entry) do
+    %{state | browser_tokens: Map.put(state.browser_tokens, token, entry)}
+  end
+
+  defp clear_expired_reservation(%{reserved_at: reserved_at} = entry)
+       when is_integer(reserved_at) do
+    if System.monotonic_time(:millisecond) - reserved_at >= @browser_join_reservation_ttl do
+      entry
+      |> Map.delete(:reserved_at)
+      |> Map.delete(:reserved_tab_id)
+    else
+      entry
+    end
+  end
+
+  defp clear_expired_reservation(entry), do: entry
+
+  defp reserved?(%{reserved_at: reserved_at}) when is_integer(reserved_at) do
+    System.monotonic_time(:millisecond) - reserved_at < @browser_join_reservation_ttl
+  end
+
+  defp reserved?(_entry), do: false
+
+  defp browser_token_entry(token) do
+    now = System.monotonic_time(:millisecond)
+    %{token: token, expires_at: now + @browser_token_ttl, consumed_at: nil}
+  end
+
+  defp browser_token_active?(%{consumed_at: consumed_at}) when not is_nil(consumed_at), do: false
+
+  defp browser_token_active?(%{expires_at: expires_at}) do
+    System.monotonic_time(:millisecond) < expires_at
+  end
+
+  defp join_blocks_token?(state, token) do
+    not is_nil(state.socket_pid) or
+      case state.pending_finalize do
+        %{token: ^token} -> true
+        _ -> false
+      end
+  end
+
+  defp register_registry_key(key) do
+    case Registry.register(Dialup.SessionRegistry, key, nil) do
+      {:ok, _} ->
+        :ok
+
+      {:error, {:already_registered, pid}} when pid == self() ->
+        :ok
+
+      {:error, {:already_registered, _pid}} ->
+        {:error, :tab_id_in_use}
+    end
+  end
+
+  defp random_id, do: :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
 end
