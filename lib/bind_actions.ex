@@ -1,15 +1,15 @@
-defmodule Dialup.SetActions do
+defmodule Dialup.BindActions do
   @moduledoc false
 
-  @key :dialup_set_actions
+  @key :dialup_bind_actions
 
   def begin_collect do
     Process.put(@key, %{})
   end
 
-  def record(name, updates) when is_map(updates) do
+  def record(name, bind) when is_map(bind) do
     map = Process.get(@key, %{})
-    Process.put(@key, Map.put(map, to_string(name), normalize_keys(updates)))
+    Process.put(@key, Map.put(map, to_string(name), normalize_keys(bind)))
   end
 
   def collect, do: Process.get(@key, %{})

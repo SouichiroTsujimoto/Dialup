@@ -6,8 +6,10 @@ defmodule Dialup.Command do
   """
   def build(context_module, command_name, bind, arguments) when is_map(bind) and is_map(arguments) do
     module = command_module(context_module, command_name)
-    fields = merge_fields(bind, arguments)
-    {:ok, struct(module, fields)}
+
+    with {:ok, fields} <- merge_fields(bind, arguments) do
+      {:ok, struct(module, fields)}
+    end
   rescue
     e in [ArgumentError, UndefinedFunctionError] ->
       {:error, {:invalid_command, Exception.message(e)}}
@@ -41,25 +43,27 @@ defmodule Dialup.Command do
   end
 
   defp merge_fields(bind, arguments) do
-    normalized_args =
-      arguments
-      |> Map.drop(["_version", :_version, "_dialup_actor"])
-      |> Enum.map(fn {k, v} -> {to_existing_atom(k), v} end)
-      |> Map.new()
-
-    bind
-    |> Enum.map(fn {k, v} -> {to_existing_atom(k), v} end)
-    |> Map.new()
-    |> Map.merge(normalized_args)
+    with {:ok, normalized_bind} <- normalize_key_map(bind),
+         {:ok, normalized_args} <-
+           normalize_key_map(Map.drop(arguments, ["_version", :_version, "_dialup_actor"])) do
+      {:ok, Map.merge(normalized_bind, normalized_args)}
+    end
   end
 
-  defp to_existing_atom(key) when is_atom(key), do: key
+  defp normalize_key_map(map) do
+    Enum.reduce_while(map, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
+      case key_to_atom(k) do
+        {:ok, key} -> {:cont, {:ok, Map.put(acc, key, v)}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
 
-  defp to_existing_atom(key) when is_binary(key) do
-    try do
-      String.to_existing_atom(key)
-    rescue
-      ArgumentError -> String.to_atom(key)
-    end
+  defp key_to_atom(key) when is_atom(key), do: {:ok, key}
+
+  defp key_to_atom(key) when is_binary(key) do
+    {:ok, String.to_existing_atom(key)}
+  rescue
+    ArgumentError -> {:error, {:invalid_command, "unknown parameter key: #{key}"}}
   end
 end

@@ -214,6 +214,8 @@ defmodule Dialup.Page do
     {context_module, command_name} = normalize_command!(command)
     name = assigns |> Map.get(:name, command_name) |> to_string()
     available = Map.get(assigns, :available, true)
+    bind = Map.get(assigns, :bind, %{})
+    Dialup.BindActions.record(name, bind)
 
     params =
       assigns
@@ -704,6 +706,14 @@ defmodule Dialup.Page do
           end
 
         mode == :set ->
+          if Map.get(action, :set) != :runtime do
+            raise CompileError,
+              file: env.file,
+              line: env.line,
+              description:
+                "Dialup set actions must be declared inline in HEEx with set={...}, not via declare_action/1"
+          end
+
           for key <- [:name, :desc, :set], not Map.has_key?(action, key) do
             raise CompileError,
               file: env.file,

@@ -66,7 +66,8 @@ defmodule Dialup.UserSessionProcess do
       audit_log: [],
       ui_locked: false,
       lock_reason: nil,
-      set_actions: %{}
+      set_actions: %{},
+      bind_actions: %{}
     }
 
     state =
@@ -449,7 +450,7 @@ defmodule Dialup.UserSessionProcess do
             {:push_event, event_name, event_payload, new_merged} ->
               {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
               new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-              send_push_event(new_state, event_name, event_payload)
+              new_state = send_push_event(new_state, event_name, event_payload)
               {:noreply, new_state}
           end
         rescue
@@ -693,10 +694,14 @@ defmodule Dialup.UserSessionProcess do
 
   defp render(state) do
     Dialup.SetActions.begin_collect()
+    Dialup.BindActions.begin_collect()
     html = do_render(state)
     set_actions = Dialup.SetActions.collect()
+    bind_actions = Dialup.BindActions.collect()
     Dialup.SetActions.clear()
+    Dialup.BindActions.clear()
     Process.put(:dialup_last_set_actions, set_actions)
+    Process.put(:dialup_last_bind_actions, bind_actions)
     html
   end
 
@@ -709,10 +714,17 @@ defmodule Dialup.UserSessionProcess do
     end
   end
 
-  defp capture_set_actions(state) do
+  defp capture_render_actions(state) do
     set_actions = Process.get(:dialup_last_set_actions, state.set_actions)
+    bind_actions = Process.get(:dialup_last_bind_actions, state.bind_actions)
     Process.delete(:dialup_last_set_actions)
-    %{state | set_actions: set_actions}
+    Process.delete(:dialup_last_bind_actions)
+    %{state | set_actions: set_actions, bind_actions: bind_actions}
+  end
+
+  defp refresh_render_actions(state) do
+    _html = render(state)
+    capture_render_actions(state)
   end
 
   defp put_title(payload, state) do
@@ -747,7 +759,7 @@ defmodule Dialup.UserSessionProcess do
     state =
       if state.socket_pid do
         html = render(state)
-        state = capture_set_actions(state)
+        state = capture_render_actions(state)
 
         payload = %{html: html, path: state.path}
         payload = put_title(payload, state)
@@ -852,7 +864,7 @@ defmodule Dialup.UserSessionProcess do
       {:push_event, event_name, event_payload, new_merged} ->
         {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
         new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
-        send_push_event(new_state, event_name, event_payload)
+        new_state = send_push_event(new_state, event_name, event_payload)
         {:ok, new_state}
 
       other ->
@@ -860,11 +872,13 @@ defmodule Dialup.UserSessionProcess do
     end
   end
 
-  defp apply_set_action(state, action, merged) do
+  defp apply_set_action(state, action, _merged) do
     key = to_string(action.name)
+    state = refresh_render_actions(state)
 
     case Map.fetch(state.set_actions, key) do
       {:ok, updates} ->
+        merged = merge_for_render(state)
         new_merged = Map.merge(merged, updates)
         {new_session, new_assigns} = split_assigns(new_merged, state.session_keys)
         new_state = bump_version(%{state | session: new_session, assigns: new_assigns})
@@ -877,16 +891,40 @@ defmodule Dialup.UserSessionProcess do
 
   defp apply_command_action(state, action, value) do
     {context_module, command_name} = action.command
-    bind = Map.get(action, :bind, %{})
+    state = refresh_render_actions(state)
+    bind = runtime_bind(state, action)
 
-    with {:ok, command} <-
-           Dialup.Command.build(context_module, command_name, bind, value || %{}),
+    with {:ok, arguments} <- validate_command_arguments(action, value || %{}),
+         {:ok, command} <-
+           Dialup.Command.build(context_module, command_name, bind, arguments),
          :ok <- dispatch_command(context_module, command) do
       new_state = state |> remount_page() |> update_page()
       {:ok, new_state}
     else
+      {:error, {:invalid_arguments, errors}} ->
+        {:error, {:command_failed, "Invalid arguments: #{inspect(errors)}"}}
+
       {:error, reason} ->
         {:error, {:command_failed, Dialup.Command.map_error(action, reason)}}
+    end
+  end
+
+  defp runtime_bind(state, action) do
+    key = to_string(action.name)
+
+    case Map.fetch(state.bind_actions, key) do
+      {:ok, bind} -> bind
+      :error -> Map.get(action, :bind, %{})
+    end
+  end
+
+  defp validate_command_arguments(action, arguments) do
+    clean =
+      Map.drop(arguments, ["_version", :_version, "_dialup_actor", :_dialup_actor])
+
+    case Dialup.Agent.Validator.validate(action, clean) do
+      {:ok, validated} -> {:ok, validated}
+      {:error, errors} -> {:error, {:invalid_arguments, errors}}
     end
   end
 
@@ -983,6 +1021,7 @@ defmodule Dialup.UserSessionProcess do
   defp send_push_event(state, event_name, event_payload) do
     if state.socket_pid do
       html = render(state)
+      state = capture_render_actions(state)
 
       payload = %{
         html: html,
@@ -994,6 +1033,9 @@ defmodule Dialup.UserSessionProcess do
       payload = put_title(payload, state)
       payload = put_ui_lock(payload, state)
       send(state.socket_pid, {:send_html, Jason.encode!(payload)})
+      state
+    else
+      state
     end
   end
 
