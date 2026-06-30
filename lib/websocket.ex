@@ -21,7 +21,9 @@ defmodule Dialup.WebSocket do
       case Registry.lookup(Dialup.SessionRegistry, {:browser_token, join_token}) do
         [{pid, _}] ->
           case Dialup.UserSessionProcess.browser_join_with_token(pid, self(), tab_id, join_token) do
-            :ok -> {:ok, pid}
+            :ok ->
+              {:ok, pid}
+
             _ ->
               _ = Dialup.UserSessionProcess.release_browser_join_reservation(pid, join_token)
               :error

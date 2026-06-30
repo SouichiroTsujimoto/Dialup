@@ -4,7 +4,8 @@ defmodule Dialup.Command do
   @doc """
   Builds a Commanded command struct from context, command name, bind map, and request params.
   """
-  def build(context_module, command_name, bind, arguments) when is_map(bind) and is_map(arguments) do
+  def build(context_module, command_name, bind, arguments)
+      when is_map(bind) and is_map(arguments) do
     module = command_module(context_module, command_name)
 
     with {:ok, fields} <- merge_fields(bind, arguments) do

@@ -8,9 +8,7 @@ defmodule Dialup.AgentHandoffTest do
   setup_all do
     start_supervised!({Registry, keys: :unique, name: Dialup.SessionRegistry})
 
-    start_supervised!(
-      {DynamicSupervisor, name: Dialup.SessionSupervisor, strategy: :one_for_one}
-    )
+    start_supervised!({DynamicSupervisor, name: Dialup.SessionSupervisor, strategy: :one_for_one})
 
     :ok
   end
@@ -936,6 +934,7 @@ defmodule Dialup.AgentHandoffTest do
     assert {:ok, _} = UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_a)
 
     assert :ok = UserSessionProcess.browser_join_with_token(pid, self(), tab_a, join_token)
+
     assert {:error, :already_joined} =
              UserSessionProcess.browser_join_with_token(pid, self(), tab_b, join_token)
   end
@@ -992,9 +991,12 @@ defmodule Dialup.AgentHandoffTest do
 
     results =
       1..2
-      |> Task.async_stream(fn i ->
-        UserSessionProcess.reserve_browser_join_token(pid, join_token, unique("tab-#{i}"))
-      end, timeout: 5_000)
+      |> Task.async_stream(
+        fn i ->
+          UserSessionProcess.reserve_browser_join_token(pid, join_token, unique("tab-#{i}"))
+        end,
+        timeout: 5_000
+      )
       |> Enum.map(fn {:ok, result} -> result end)
 
     assert Enum.count(results, &match?({:ok, _}, &1)) == 1

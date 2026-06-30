@@ -235,7 +235,10 @@ defmodule Dialup.Page do
       assigns
       |> Phoenix.Component.assign(:action_name, name)
       |> Phoenix.Component.assign(:available, available)
-      |> Phoenix.Component.assign(:confirm_name, assigns[:confirm] && to_string(assigns[:confirm]))
+      |> Phoenix.Component.assign(
+        :confirm_name,
+        assigns[:confirm] && to_string(assigns[:confirm])
+      )
       |> Phoenix.Component.assign(:action_desc, Map.get(assigns, :desc))
       |> Phoenix.Component.assign(:encoded_params, params)
       |> Phoenix.Component.assign_new(:class, fn -> nil end)

@@ -132,8 +132,7 @@ defmodule Mix.Tasks.Dialup.Gen.Aggregate do
       aggregate_module: Module.concat([app_module, context_name, Aggregates, aggregate_name]),
       aggregate_mod:
         module_str(Module.concat([app_module, context_name, Aggregates, aggregate_name])),
-      agg_mod:
-        module_str(Module.concat([app_module, context_name, Aggregates, aggregate_name])),
+      agg_mod: module_str(Module.concat([app_module, context_name, Aggregates, aggregate_name])),
       aggregate_underscore: Macro.underscore(aggregate_name),
       table_name: table,
       commands: commands,
@@ -147,7 +146,8 @@ defmodule Mix.Tasks.Dialup.Gen.Aggregate do
     static_files = [
       {"context.ex", Path.join(base, "#{bindings[:context_path]}.ex")},
       {"aggregate.ex", Path.join(base, "aggregates/#{bindings[:aggregate_underscore]}.ex")},
-      {"projector.ex", Path.join(base, "projectors/#{bindings[:aggregate_underscore]}_summary.ex")},
+      {"projector.ex",
+       Path.join(base, "projectors/#{bindings[:aggregate_underscore]}_summary.ex")},
       {"projection.ex",
        Path.join(base, "projections/#{bindings[:aggregate_underscore]}_summary.ex")},
       {"commanded_app.ex", "lib/#{otp_app}/commanded_app.ex"},
@@ -178,7 +178,11 @@ defmodule Mix.Tasks.Dialup.Gen.Aggregate do
       write_template(
         "event.ex",
         Path.join(base, "events/#{event_path}.ex"),
-        Keyword.merge(bindings, command: cmd, event_module: cmd.event_module, event_mod: cmd.event_module),
+        Keyword.merge(bindings,
+          command: cmd,
+          event_module: cmd.event_module,
+          event_mod: cmd.event_module
+        ),
         force?
       )
     end

@@ -18,7 +18,9 @@ defmodule Mix.Tasks.Dialup.ContextMap do
     contexts = Dialup.Contexts.load_contexts()
 
     if contexts == [] do
-      Mix.raise("No modules exporting __dialup_contexts__/0 were found. Define one with use Dialup.Contexts.")
+      Mix.raise(
+        "No modules exporting __dialup_contexts__/0 were found. Define one with use Dialup.Contexts."
+      )
     end
 
     mermaid = Dialup.Contexts.generate_mermaid(contexts)

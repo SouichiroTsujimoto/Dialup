@@ -16,7 +16,9 @@ defmodule Dialup.Contexts do
 
   defmacro __using__(_opts) do
     quote do
-      import Dialup.Contexts, only: [context: 2, commanded_context: 1, aggregates: 1, events_out: 1, events_in: 1]
+      import Dialup.Contexts,
+        only: [context: 2, commanded_context: 1, aggregates: 1, events_out: 1, events_in: 1]
+
       Module.register_attribute(__MODULE__, :dialup_contexts, accumulate: true)
       Module.register_attribute(__MODULE__, :dialup_current_context, accumulate: false)
       @before_compile Dialup.Contexts
@@ -41,7 +43,11 @@ defmodule Dialup.Contexts do
 
   defmacro commanded_context(module) do
     quote do
-      @dialup_current_context Map.put(@dialup_current_context, :commanded_context, unquote(module))
+      @dialup_current_context Map.put(
+                                @dialup_current_context,
+                                :commanded_context,
+                                unquote(module)
+                              )
     end
   end
 

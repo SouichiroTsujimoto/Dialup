@@ -34,7 +34,10 @@ defmodule Dialup.AvailableIntegrationTest do
     assert increment["_meta"]["available"] == true
   end
 
-  test "tools/call returns unavailable when derived availability is false", %{pid: pid, token: token} do
+  test "tools/call returns unavailable when derived availability is false", %{
+    pid: pid,
+    token: token
+  } do
     for _ <- 1..10 do
       UserSessionProcess.event(pid, "increment", %{"amount" => 1})
       assert_receive {:send_html, _}

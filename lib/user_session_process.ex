@@ -30,8 +30,10 @@ defmodule Dialup.UserSessionProcess do
   def navigate(pid, path), do: GenServer.cast(pid, {:navigate, path})
   def event(pid, event, value), do: GenServer.cast(pid, {:event, event, value})
   def session_id(pid), do: GenServer.call(pid, :get_session_id)
+
   def take_over(pid, new_socket_pid, tab_id \\ nil),
     do: GenServer.call(pid, {:take_over, new_socket_pid, tab_id})
+
   def reconnect(pid, path), do: GenServer.cast(pid, {:reconnect, path})
   def agent_describe(pid, token), do: GenServer.call(pid, {:agent_describe, token})
   def agent_tools(pid, token), do: GenServer.call(pid, {:agent_tools, token})
@@ -42,6 +44,7 @@ defmodule Dialup.UserSessionProcess do
   def revoke_agent(pid, token), do: GenServer.call(pid, {:agent_revoke, token})
   def issue_agent_grant(pid, opts), do: GenServer.call(pid, {:agent_grant, opts})
   def issue_browser_handoff(pid), do: GenServer.call(pid, :issue_browser_handoff)
+
   def browser_join(pid, new_socket_pid, tab_id \\ nil),
     do: GenServer.call(pid, {:browser_join, new_socket_pid, tab_id})
 
@@ -241,8 +244,7 @@ defmodule Dialup.UserSessionProcess do
       {:ok, %{reserved_at: _} = entry} ->
         released = entry |> Map.delete(:reserved_at) |> Map.delete(:reserved_tab_id)
 
-        {:reply, :ok,
-         %{state | browser_tokens: Map.put(state.browser_tokens, token, released)}}
+        {:reply, :ok, %{state | browser_tokens: Map.put(state.browser_tokens, token, released)}}
 
       _ ->
         {:reply, {:error, :not_reserved}, state}
@@ -254,32 +256,32 @@ defmodule Dialup.UserSessionProcess do
       {:reply, {:error, :invalid_token}, state}
     else
       case Map.fetch(state.browser_tokens, token) do
-      {:ok, entry} ->
-        entry = clear_expired_reservation(entry)
-        state = put_browser_token(state, token, entry)
+        {:ok, entry} ->
+          entry = clear_expired_reservation(entry)
+          state = put_browser_token(state, token, entry)
 
-        cond do
-          not browser_token_active?(entry) ->
-            {:reply, {:error, :invalid_token}, state}
+          cond do
+            not browser_token_active?(entry) ->
+              {:reply, {:error, :invalid_token}, state}
 
-          join_blocks_token?(state, token) ->
-            {:reply, {:error, :already_joined}, state}
+            join_blocks_token?(state, token) ->
+              {:reply, {:error, :already_joined}, state}
 
-          reserved?(entry) ->
-            {:reply, {:error, :already_reserved}, state}
+            reserved?(entry) ->
+              {:reply, {:error, :already_reserved}, state}
 
-          true ->
-            reserved =
-              entry
-              |> Map.put(:reserved_at, System.monotonic_time(:millisecond))
-              |> Map.put(:reserved_tab_id, tab_id)
+            true ->
+              reserved =
+                entry
+                |> Map.put(:reserved_at, System.monotonic_time(:millisecond))
+                |> Map.put(:reserved_tab_id, tab_id)
 
-            {:reply, {:ok, state.session_id}, put_browser_token(state, token, reserved)}
-        end
+              {:reply, {:ok, state.session_id}, put_browser_token(state, token, reserved)}
+          end
 
-      :error ->
-        {:reply, {:error, :invalid_token}, state}
-    end
+        :error ->
+          {:reply, {:error, :invalid_token}, state}
+      end
     end
   end
 
@@ -925,27 +927,28 @@ defmodule Dialup.UserSessionProcess do
   defp merge_session_for(path, state) do
     layouts = state.app_module.layouts_for(path)
 
-    Enum.reduce(layouts, {state.session, state.session_keys, state.mounted_layouts}, fn layout_mod,
-                                                                                        {session,
-                                                                                         keys,
-                                                                                         mounted} ->
-      if MapSet.member?(mounted, layout_mod) do
-        {session, keys, mounted}
-      else
-        {:ok, fresh_session} = layout_mod.mount(session)
-        new_keys = MapSet.new(Map.keys(fresh_session))
-        added_keys = MapSet.difference(new_keys, keys)
+    Enum.reduce(
+      layouts,
+      {state.session, state.session_keys, state.mounted_layouts},
+      fn layout_mod, {session, keys, mounted} ->
+        if MapSet.member?(mounted, layout_mod) do
+          {session, keys, mounted}
+        else
+          {:ok, fresh_session} = layout_mod.mount(session)
+          new_keys = MapSet.new(Map.keys(fresh_session))
+          added_keys = MapSet.difference(new_keys, keys)
 
-        merged =
-          added_keys
-          |> MapSet.to_list()
-          |> Enum.reduce(session, fn k, acc ->
-            Map.put_new(acc, k, Map.get(fresh_session, k))
-          end)
+          merged =
+            added_keys
+            |> MapSet.to_list()
+            |> Enum.reduce(session, fn k, acc ->
+              Map.put_new(acc, k, Map.get(fresh_session, k))
+            end)
 
-        {merged, MapSet.union(keys, new_keys), MapSet.put(mounted, layout_mod)}
+          {merged, MapSet.union(keys, new_keys), MapSet.put(mounted, layout_mod)}
+        end
       end
-    end)
+    )
   end
 
   # page.mount を呼び、session キーを除いた純粋な page assigns を返す
@@ -1051,7 +1054,9 @@ defmodule Dialup.UserSessionProcess do
 
         case entry do
           %{reserved_tab_id: reserved_tab_id} when is_binary(reserved_tab_id) ->
-            if reserved?(entry) and reserved_tab_id == tab_id, do: :ok, else: {:error, :invalid_token}
+            if reserved?(entry) and reserved_tab_id == tab_id,
+              do: :ok,
+              else: {:error, :invalid_token}
 
           _ ->
             :ok

@@ -1,9 +1,11 @@
 defmodule Dialup.AgentHandoffTest.BoardPage do
   use Dialup.Page
 
-  declare_action name: :set_board_label,
-                 desc: "Update the persisted board label",
-                 params: %{value: :string}
+  declare_action(
+    name: :set_board_label,
+    desc: "Update the persisted board label",
+    params: %{value: :string}
+  )
 
   def mount(_params, assigns), do: {:ok, assigns}
 

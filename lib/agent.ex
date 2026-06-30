@@ -15,7 +15,13 @@ defmodule Dialup.Agent do
 
   def endpoint(token), do: "/agent/#{token}"
 
-  @builtin_tool_names ["read_scene", "read_audit_log", "lock_ui", "unlock_ui", "issue_browser_url"]
+  @builtin_tool_names [
+    "read_scene",
+    "read_audit_log",
+    "lock_ui",
+    "unlock_ui",
+    "issue_browser_url"
+  ]
   def builtin_tool_names, do: @builtin_tool_names
 
   @doc """
@@ -396,7 +402,7 @@ defmodule Dialup.Agent do
      %{
        "protocolVersion" => negotiated,
        "capabilities" => %{"tools" => %{"listChanged" => false}},
-       "serverInfo" => %{"name" => "dialup-session", "version" => "0.1.3"}
+       "serverInfo" => %{"name" => "dialup-session", "version" => "0.2.0"}
      }}
   end
 
