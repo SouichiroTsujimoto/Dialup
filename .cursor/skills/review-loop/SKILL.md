@@ -31,6 +31,11 @@ Accept `/review-loop [options] [target]`.
 | `PR <n>` or PR URL | Review that pull request's head branch vs base |
 | `branch <name>` | Review named branch vs base |
 
+When the target is a PR (explicit `PR <n>` or the current branch has an open PR),
+record the PR number at loop start and **post a comment after every round** (see
+**PR comments** below). If no PR exists yet, skip PR comments and note that in the
+final chat summary.
+
 ## Review Rubric (same as /code-review)
 
 Apply on every round:
@@ -63,11 +68,14 @@ Track per finding:
 ### Round 0 — Baseline (review only)
 
 1. Determine diff scope (see **Gather diff** below).
-2. Review using the **Review Rubric**. Do **not** edit code in Round 0 unless the
+2. If target is a PR, resolve PR number (`gh pr view --json number` on the head
+   branch) and keep it for the whole loop.
+3. Review using the **Review Rubric**. Do **not** edit code in Round 0 unless the
    user explicitly asked to fix in the same turn.
-3. Parse findings into the ledger.
-4. Print **Round 0 Summary** (format below).
-5. If zero Medium+ findings: report clean and stop (Low/Info may be listed as
+4. Parse findings into the ledger.
+5. Print **Round 0 Summary** (format below).
+6. **Post Round 0 Summary to the PR** when a PR is in scope (see **PR comments**).
+7. If zero Medium+ findings: report clean and stop (Low/Info may be listed as
    `wont_fix` or noted once).
 
 ### Round N — Fix & Re-review
@@ -83,7 +91,8 @@ Track per finding:
 6. **Re-review** — Same rubric on updated diff.
 7. **Reconcile** ledger (fixed → reappeared = oscillation signal).
 8. Print **Round N Summary**.
-9. All `fixed` or `wont_fix` → done. Else Round N+1.
+9. **Post Round N Summary to the PR** when a PR is in scope (see **PR comments**).
+10. All `fixed` or `wont_fix` → done. Else Round N+1.
 
 ### Stopping Conditions
 
@@ -139,8 +148,13 @@ review-bugbot subagents.
 
 ## Round Summary Format
 
+Use this format in chat **and** in PR comments.
+
 ```
-## Round N Summary
+## Review Loop — Round N
+
+**Target:** PR #26 (or branch name)
+**Verdict:** CLEAN | N Medium+ remaining | STOPPED (reason)
 
 | # | Severity | Location | Finding | Status |
 |---|----------|----------|---------|--------|
@@ -150,6 +164,43 @@ review-bugbot subagents.
 Resolved: 3 | New: 1 | Reappeared: 0 | Remaining: 2
 Delta: -2 (net reduction from previous round)
 ```
+
+Round 0 uses `Verdict: N Medium+ remaining` or `CLEAN`. Fix rounds add commits
+under **Fixed this round** when applicable:
+
+```
+### Fixed this round
+- `abc1234` — short description of fixes (Round N only)
+```
+
+When the loop stops early (oscillation, divergence, test failure), set
+`Verdict: STOPPED (...)` and include **Recommended next step**.
+
+## PR Comments
+
+**Required:** after printing each round summary, post the same content to the PR.
+
+1. Resolve PR number once at loop start:
+   ```bash
+   gh pr view --json number,url --jq '.number'
+   # or use the number from `PR <n>` in the user prompt
+   ```
+2. Post after **every** round (0, 1, 2, …), including the final round:
+   ```bash
+   gh pr comment <number> --body "$(cat <<'EOF'
+   ## Review Loop — Round N
+   ...
+   EOF
+   )"
+   ```
+3. One comment per round — do **not** edit previous round comments; the PR thread
+   is an append-only audit trail.
+4. If `gh pr comment` fails (permissions, no PR), retry once, then report the
+   failure in chat and continue the loop locally.
+5. Branch-only reviews (no open PR): skip PR comments; mention in chat only.
+
+Cloud Agents should post comments **before** starting the next fix round or
+before giving the final chat summary.
 
 ## Anti-Oscillation Rules
 
@@ -165,6 +216,7 @@ Delta: -2 (net reduction from previous round)
 2. Total rounds run
 3. If stopped: reason and recommended next step
 4. Commits created (for easy revert)
+5. Link to PR comment thread when comments were posted (`gh pr view <n> --json url`)
 
 ## Relation to GitHub Bugbot
 
