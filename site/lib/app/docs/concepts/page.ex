@@ -59,6 +59,7 @@ defmodule Dialup.App.Docs.Concepts.Page do
   → render → HTML 送信
 
 ページ遷移（ws-href）:
+  → 新しい layout があればその mount/1 のみ追加（既存 layout は再実行しない）
   → page.mount/2（assigns リセット）→ render → HTML 送信
 
 イベント（ws-event / ws-submit / ws-change）:
@@ -105,12 +106,23 @@ end|
   end
 end|
 
+  defp code_browser_join, do: ~S|エージェント先行 → 人間参加（browser handoff）:
+
+  1. POST /_dialup/agent-session または Dialup.Session.start/2
+     → headless UserSessionProcess + MCP token
+  2. tools/call issue_browser_url → browserUrl（/path?_join=TOKEN）
+  3. 人間が URL を開く（この時点では cookie 未設定）
+  4. dialup.js → WebSocket /ws?tab_id=…&join_token=…（ライブ HTML + join_finalize_nonce）
+  5. POST /_dialup/finalize-join → dialup_session cookie 設定 + token 消費（単一完了点）
+  6. __reconnect で表示同期|
+
   defp code_mcp_arch, do: ~S|【人間】 dialup.js ──WebSocket──► UserSessionProcess
 【AI】   POST /mcp (Bearer token) または /agent/:token ──► 同じ UserSessionProcess
                 │
          declare_action / dialup_action
                 │
-           tools/list · tools/call|
+           tools/list · tools/call
+           issue_browser_url → browser handoff（finalize-join で完了）|
 
   def render(assigns) do
     ~H"""
@@ -224,9 +236,19 @@ end|
       <code>POST /agent/:token</code> は同じハンドラへ届く path-token 形式です。
     </p>
     <pre class="arch-diagram">{code_mcp_arch()}</pre>
+
+    <h2>エージェント先行と browser handoff</h2>
+    <p>
+      人間のタブがまだ無い状態から AI が先に操作を始める場合、
+      <code>POST /_dialup/agent-session</code> で headless セッションを起動し、
+      MCP で操作したあと <code>issue_browser_url</code> で参加用 URL を発行します。
+      人間側は URL を開いただけでは join 完了ではなく、WebSocket attach のあと
+      <code>POST /_dialup/finalize-join</code> で cookie が設定され token が消費されます。
+    </p>
+    <pre><code>{code_browser_join()}</code></pre>
     <p>
       ライブデモは <.dialup_action navigate="/agent_demo" class="inline-link">/agent_demo</.dialup_action>。
-      詳細は Hex ガイド <em>HTTP MCP API</em> を参照してください。
+      詳細は Hex ガイド <em>Session tokens for HTTP MCP</em> を参照してください。
     </p>
     </div>
     """

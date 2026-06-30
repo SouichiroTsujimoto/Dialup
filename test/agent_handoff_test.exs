@@ -7,6 +7,11 @@ defmodule Dialup.AgentHandoffTest do
 
   setup_all do
     start_supervised!({Registry, keys: :unique, name: Dialup.SessionRegistry})
+
+    start_supervised!(
+      {DynamicSupervisor, name: Dialup.SessionSupervisor, strategy: :one_for_one}
+    )
+
     :ok
   end
 
@@ -572,6 +577,16 @@ defmodule Dialup.AgentHandoffTest do
     assert hd(discovery["scene"]["regions"])["name"] == "counter"
   end
 
+  test "well-known discovery seeds nested layout session state" do
+    conn =
+      Plug.Test.conn(:get, "/.well-known/dialup-agent?path=%2Fboard")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    discovery = Jason.decode!(conn.resp_body)
+    assert discovery["scene"]["state"]["board_label"] == "empty"
+  end
+
   test "llms.txt explains HTTP MCP discovery" do
     conn =
       Plug.Test.conn(:get, "/llms.txt")
@@ -629,6 +644,471 @@ defmodule Dialup.AgentHandoffTest do
 
     assert conn.status == 409
     assert Jason.decode!(conn.resp_body)["error"] == "Live browser session was not found"
+  end
+
+  test "agent-first session starts headlessly and returns an MCP token" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+
+    assert descriptor["endpoint"] =~ ~r{^/agent/[^/]+$}
+    assert is_map(descriptor["grant"])
+    assert descriptor["path"] == "/"
+
+    read =
+      rpc(descriptor["token"], 1, "tools/call", %{
+        "name" => "read_scene",
+        "arguments" => %{}
+      })
+
+    assert read["result"]["structuredContent"]["state"]["count"] == 0
+  end
+
+  test "POST /_dialup/agent-session starts a live agent session" do
+    conn =
+      Plug.Test.conn(:post, "/_dialup/agent-session", Jason.encode!(%{"path" => "/"}))
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    assert body["endpoint"] =~ ~r{^/agent/[^/]+$}
+    assert body["path"] == "/"
+  end
+
+  test "POST /_dialup/agent-session rejects unknown paths" do
+    conn =
+      Plug.Test.conn(:post, "/_dialup/agent-session", Jason.encode!(%{"path" => "/missing"}))
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 404
+  end
+
+  test "POST /_dialup/agent-session rejects cross-origin requests" do
+    conn =
+      Plug.Test.conn(:post, "/_dialup/agent-session", Jason.encode!(%{"path" => "/"}))
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header("origin", "https://evil.example")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 403
+    assert conn.resp_body == "Forbidden origin"
+  end
+
+  test "issue_browser_url returns a one-time join URL over MCP", %{token: token} do
+    result =
+      rpc(token, 1, "tools/call", %{"name" => "issue_browser_url", "arguments" => %{}})
+
+    assert result["result"]["structuredContent"]["browserUrl"] =~ "_join="
+    assert result["result"]["structuredContent"]["browserToken"]
+    assert result["result"]["structuredContent"]["expiresInMs"] > 0
+  end
+
+  test "issue_browser_url requires the issue_browser_url capability", %{pid: pid} do
+    {:ok, descriptor} =
+      Dialup.Session.grant(pid, capabilities: [:increment], projections: [:state])
+
+    token = descriptor["token"]
+    names = rpc(token, 1, "tools/list", %{})["result"]["tools"] |> Enum.map(& &1["name"])
+    refute "issue_browser_url" in names
+
+    forbidden =
+      rpc(token, 2, "tools/call", %{"name" => "issue_browser_url", "arguments" => %{}})
+
+    assert forbidden["error"]["code"] == -32_003
+  end
+
+  test "browser join attaches a websocket to an existing headless session" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+
+    assert Registry.lookup(Dialup.SessionRegistry, {:browser_token, join_token}) == [{pid, nil}]
+
+    assert :ok = UserSessionProcess.browser_join(pid, self())
+    assert_receive {:send_html, payload}
+    assert Jason.decode!(payload)["path"] == "/"
+
+    assert :ok = UserSessionProcess.consume_browser_token(pid, join_token)
+    assert Registry.lookup(Dialup.SessionRegistry, {:browser_token, join_token}) == []
+    assert UserSessionProcess.consume_browser_token(pid, join_token) == {:error, :expired}
+  end
+
+  test "browser_join registers tab_id in the session registry" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    tab_id = unique("tab")
+
+    assert :ok = UserSessionProcess.browser_join(pid, self(), tab_id)
+    assert Registry.lookup(Dialup.SessionRegistry, tab_id) == [{pid, nil}]
+  end
+
+  test "browser_join registers session_id in the session registry" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    session_id = UserSessionProcess.session_id(pid)
+
+    assert :ok = UserSessionProcess.browser_join(pid, self(), unique("tab"))
+    assert Registry.lookup(Dialup.SessionRegistry, session_id) == [{pid, nil}]
+  end
+
+  test "headless session rejects browser attach before join token is consumed" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    session_id = UserSessionProcess.session_id(pid)
+
+    assert UserSessionProcess.awaiting_browser_join?(pid)
+
+    assert {:ok, state} =
+             Dialup.WebSocket.init(%{
+               app_module: App,
+               session_id: session_id,
+               tab_id: unique("tab")
+             })
+
+    refute state.session_pid == pid
+  end
+
+  test "finalize-join atomically consumes the join token and clears pending handoff" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+    tab_id = unique("tab")
+
+    assert {:ok, _} = UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_id)
+    assert :ok = UserSessionProcess.browser_join_with_token(pid, self(), tab_id, join_token)
+    nonce = :sys.get_state(pid).pending_finalize.nonce
+
+    conn =
+      Plug.Test.conn(:post, "/_dialup/finalize-join?tab_id=#{tab_id}&nonce=#{nonce}")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    refute UserSessionProcess.browser_token_active?(pid, join_token)
+    assert is_nil(:sys.get_state(pid).pending_finalize)
+  end
+
+  test "a newly issued join token works after finalize when the browser disconnects" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+    tab_a = unique("tab-a")
+    tab_b = unique("tab-b")
+    socket = spawn(fn -> Process.sleep(:infinity) end)
+
+    assert {:ok, _} = UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_a)
+    assert :ok = UserSessionProcess.browser_join_with_token(pid, socket, tab_a, join_token)
+    nonce = :sys.get_state(pid).pending_finalize.nonce
+
+    conn =
+      Plug.Test.conn(:post, "/_dialup/finalize-join?tab_id=#{tab_a}&nonce=#{nonce}")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    refute UserSessionProcess.browser_token_active?(pid, join_token)
+    Process.exit(socket, :kill)
+    Process.sleep(20)
+
+    {:ok, fresh_browser} = Dialup.Session.browser_url(pid)
+    fresh_token = fresh_browser["browserToken"]
+    refute fresh_token == join_token
+
+    assert {:ok, _} = UserSessionProcess.reserve_browser_join_token(pid, fresh_token, tab_b)
+  end
+
+  test "finalize-join sets the session cookie after browser join" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+    tab_id = unique("tab")
+
+    assert {:ok, _} = UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_id)
+    assert :ok = UserSessionProcess.browser_join_with_token(pid, self(), tab_id, join_token)
+    nonce = :sys.get_state(pid).pending_finalize.nonce
+
+    conn =
+      Plug.Test.conn(:post, "/_dialup/finalize-join?tab_id=#{tab_id}&nonce=#{nonce}")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    assert ["dialup_session=" <> _] = Plug.Conn.get_resp_header(conn, "set-cookie")
+  end
+
+  test "reload reconnects to a joined headless session by session_id" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    session_id = UserSessionProcess.session_id(pid)
+    tab_id = unique("tab")
+
+    assert :ok = UserSessionProcess.browser_join(pid, self(), tab_id)
+
+    new_tab = unique("tab")
+
+    assert {:ok, state} =
+             Dialup.WebSocket.init(%{
+               app_module: App,
+               session_id: session_id,
+               tab_id: new_tab
+             })
+
+    assert state.session_pid == pid
+    assert Registry.lookup(Dialup.SessionRegistry, new_tab) == [{pid, nil}]
+  end
+
+  test "GET with consumed _join does not attach the headless session cookie" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_url = browser["browserUrl"]
+    join_token = browser["browserToken"]
+    headless_session_id = UserSessionProcess.session_id(pid)
+
+    assert :ok = UserSessionProcess.consume_browser_token(pid, join_token)
+
+    conn =
+      Plug.Test.conn(:get, join_url)
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    ["dialup_session=" <> cookie_value] = Plug.Conn.get_resp_header(conn, "set-cookie")
+    refute String.starts_with?(cookie_value, headless_session_id)
+  end
+
+  test "invalid browser join token stops websocket init" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    session_id = UserSessionProcess.session_id(pid)
+
+    assert {:stop, :invalid_browser_join} =
+             Dialup.WebSocket.init(%{
+               app_module: App,
+               session_id: session_id,
+               tab_id: unique("tab"),
+               join_token: "invalid-token"
+             })
+  end
+
+  test "consumed browser join token stops websocket init" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+    session_id = UserSessionProcess.session_id(pid)
+
+    assert :ok = UserSessionProcess.consume_browser_token(pid, join_token)
+
+    assert {:stop, :invalid_browser_join} =
+             Dialup.WebSocket.init(%{
+               app_module: App,
+               session_id: session_id,
+               tab_id: unique("tab"),
+               join_token: join_token
+             })
+  end
+
+  test "consumed browser join token is rejected before websocket upgrade" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+
+    assert :ok = UserSessionProcess.consume_browser_token(pid, join_token)
+
+    conn =
+      Plug.Test.conn(:get, "/ws?tab_id=test-tab&join_token=#{join_token}")
+      |> Plug.Conn.put_req_header("cookie", "dialup_session=placeholder")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 403
+  end
+
+  test "browser_join_with_token allows only one reserved tab to attach" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+    tab_a = unique("tab-a")
+    tab_b = unique("tab-b")
+
+    assert {:ok, _} = UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_a)
+
+    assert :ok = UserSessionProcess.browser_join_with_token(pid, self(), tab_a, join_token)
+    assert {:error, :already_joined} =
+             UserSessionProcess.browser_join_with_token(pid, self(), tab_b, join_token)
+  end
+
+  test "reserve_browser_join_token rejects after browser has attached" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+    tab_a = unique("tab-a")
+    tab_b = unique("tab-b")
+
+    assert {:ok, _} = UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_a)
+    assert :ok = UserSessionProcess.browser_join_with_token(pid, self(), tab_a, join_token)
+
+    assert {:error, :already_joined} =
+             UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_b)
+  end
+
+  test "pending browser join rolls back when finalize is not completed in time" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+    tab_a = unique("tab-a")
+    tab_b = unique("tab-b")
+
+    assert {:ok, _} = UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_a)
+    assert :ok = UserSessionProcess.browser_join_with_token(pid, self(), tab_a, join_token)
+
+    %{pending_finalize: %{nonce: nonce}} = :sys.get_state(pid)
+    send(pid, {:pending_finalize_timeout, nonce})
+
+    assert Process.alive?(pid)
+    assert UserSessionProcess.awaiting_browser_join?(pid)
+    assert {:ok, _} = UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_b)
+  end
+
+  test "reserve_browser_join_token requires tab_id" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+
+    assert {:error, :invalid_token} =
+             UserSessionProcess.reserve_browser_join_token(pid, join_token, "")
+  end
+
+  test "reserve_browser_join_token allows only one concurrent reservation" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_token = browser["browserToken"]
+
+    results =
+      1..2
+      |> Task.async_stream(fn i ->
+        UserSessionProcess.reserve_browser_join_token(pid, join_token, unique("tab-#{i}"))
+      end, timeout: 5_000)
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.count(results, &match?({:ok, _}, &1)) == 1
+
+    assert Enum.count(results, fn
+             {:error, :already_reserved} -> true
+             {:error, :invalid_token} -> true
+             _ -> false
+           end) == 1
+  end
+
+  test "failed headless start terminates the session process" do
+    before = DynamicSupervisor.count_children(Dialup.SessionSupervisor).active
+
+    assert {:error, :init_failed} = UserSessionProcess.start_headless(App, "/boom")
+
+    Process.sleep(50)
+
+    assert DynamicSupervisor.count_children(Dialup.SessionSupervisor).active == before
+  end
+
+  test "GET with _join does not set the headless session cookie before websocket join" do
+    {:ok, descriptor} = Dialup.Session.start(App, "/")
+    {:ok, pid} = Agent.lookup(descriptor["token"])
+    {:ok, browser} = Dialup.Session.browser_url(pid)
+    join_url = browser["browserUrl"]
+    headless_session_id = UserSessionProcess.session_id(pid)
+
+    conn =
+      Plug.Test.conn(:get, join_url)
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+
+    for cookie <- Plug.Conn.get_resp_header(conn, "set-cookie") do
+      refute String.contains?(cookie, headless_session_id)
+    end
+  end
+
+  test "websocket rejects an invalid join token before upgrade" do
+    conn =
+      Plug.Test.conn(:get, "/ws?tab_id=test-tab&join_token=invalid")
+      |> Plug.Conn.put_req_header("cookie", "dialup_session=placeholder")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 403
+  end
+
+  test "HTTP GET seeds nested layout session for SSR" do
+    conn =
+      Plug.Test.conn(:get, "/board")
+      |> Dialup.Server.call(Dialup.Server.init(app: App))
+
+    assert conn.status == 200
+    assert conn.resp_body =~ "data-board-label>empty</h1>"
+  end
+
+  test "navigating to a page merges nested layout session keys", %{pid: pid, token: token} do
+    UserSessionProcess.navigate(pid, "/board")
+    assert_receive {:send_html, payload}
+    assert Jason.decode!(payload)["path"] == "/board"
+
+    scene =
+      rpc(token, 1, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
+
+    assert scene["result"]["structuredContent"]["state"]["board_label"] == "empty"
+  end
+
+  test "nested layout session survives navigation away and back", %{pid: pid, token: token} do
+    UserSessionProcess.navigate(pid, "/board")
+    assert_receive {:send_html, _to_board}
+
+    board_scene =
+      rpc(token, 1, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
+
+    version = board_scene["result"]["structuredContent"]["version"]
+
+    updated =
+      rpc(token, 2, "tools/call", %{
+        "name" => "set_board_label",
+        "arguments" => %{"value" => "kept", "_version" => version}
+      })
+
+    assert_receive {:send_html, _board_update}
+    assert updated["result"]["structuredContent"]["state"]["board_label"] == "kept"
+
+    UserSessionProcess.navigate(pid, "/")
+    assert_receive {:send_html, _to_home}
+
+    UserSessionProcess.navigate(pid, "/board")
+    assert_receive {:send_html, _back_to_board}
+
+    scene =
+      rpc(token, 3, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
+
+    assert scene["result"]["structuredContent"]["state"]["board_label"] == "kept"
+  end
+
+  test "opening the root page first still seeds nested layout session on navigate", %{
+    pid: pid,
+    token: token
+  } do
+    scene =
+      rpc(token, 1, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
+
+    refute Map.has_key?(scene["result"]["structuredContent"]["state"], "board_label")
+
+    UserSessionProcess.navigate(pid, "/board")
+    assert_receive {:send_html, _}
+
+    board =
+      rpc(token, 2, "tools/call", %{"name" => "read_scene", "arguments" => %{}})
+
+    assert board["result"]["structuredContent"]["state"]["board_label"] == "empty"
   end
 
   defp rpc(token, id, method, params) do

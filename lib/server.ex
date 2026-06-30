@@ -58,13 +58,19 @@ defmodule Dialup.Server do
     app_module = conn.private[:dialup_app]
     conn = conn |> Plug.Conn.fetch_cookies() |> Plug.Conn.fetch_query_params()
     tab_id = conn.params["tab_id"]
+    join_token = conn.params["join_token"]
 
     with :ok <- check_origin(conn, app_module),
-         {:ok, session_id} <- fetch_dialup_session(conn) do
+         {:ok, session_id, conn} <- resolve_ws_session(conn, join_token) do
       conn
       |> WebSockAdapter.upgrade(
         Dialup.WebSocket,
-        %{app_module: app_module, session_id: session_id, tab_id: tab_id},
+        %{
+          app_module: app_module,
+          session_id: session_id,
+          tab_id: tab_id,
+          join_token: join_token
+        },
         timeout: :infinity
       )
       |> halt()
@@ -96,7 +102,7 @@ defmodule Dialup.Server do
     Discovery:
     1. Read the HTTP Link header or HTML meta `dialup-agent-discovery`.
     2. Fetch `/.well-known/dialup-agent?path=<URL-encoded-path>` for page concepts and tool catalog.
-    3. Obtain a session bearer token (POST `/_dialup/agent-handoff?tab_id=...` from the live browser tab, or use a server-issued grant).
+    3. Obtain a session bearer token (POST `/_dialup/agent-handoff?tab_id=...` from the live browser tab, POST `/_dialup/agent-session` for agent-first sessions, or use a server-issued grant).
     4. POST JSON-RPC 2.0 to the MCP endpoint with `Content-Type: application/json`.
 
     Endpoints (Streamable HTTP transport):
@@ -112,6 +118,7 @@ defmodule Dialup.Server do
 
     Notes:
     - Human UI uses WebSocket (`/ws`). Agent tools use HTTP request-response only.
+    - Browser handoff: open `browserUrl`, WebSocket attach with `tab_id` + `join_token`, then POST `/_dialup/finalize-join` (sets cookie, consumes token). See guides/agent-handoff.md.
     - Actions marked `confirm=human` return an isError tool result over HTTP MCP.
     - On a stale `_version`, tools/call returns an isError result whose structuredContent.currentVersion is the latest; call read_scene and retry.
     """
@@ -119,6 +126,66 @@ defmodule Dialup.Server do
     conn
     |> put_resp_content_type("text/plain")
     |> send_resp(200, body)
+  end
+
+  post "/_dialup/agent-session" do
+    app_module = conn.private[:dialup_app]
+
+    with :ok <- check_origin(conn, app_module),
+         {:ok, body, conn} <- Plug.Conn.read_body(conn, length: 1_000_000),
+         {:ok, path} <- decode_agent_session_path(body),
+         true <- app_module.page_for(path) != nil or {:error, :not_found},
+         {:ok, result} <- Dialup.Session.start(app_module, path) do
+      send_json(conn, 200, result)
+    else
+      {:error, reason} when reason in ["Forbidden origin", "Missing origin"] ->
+        send_resp(conn, 403, reason)
+
+      {:error, :invalid_body} ->
+        send_json(conn, 400, %{"error" => "Expected JSON body with a path field"})
+
+      {:error, :not_found} ->
+        send_json(conn, 404, %{"error" => "Page does not exist"})
+
+      {:error, _reason} ->
+        send_json(conn, 500, %{"error" => "Could not start agent session"})
+
+      false ->
+        send_json(conn, 500, %{"error" => "Could not start agent session"})
+    end
+  end
+
+  post "/_dialup/finalize-join" do
+    app_module = conn.private[:dialup_app]
+    conn = conn |> Plug.Conn.fetch_query_params()
+    tab_id = conn.params["tab_id"]
+    nonce = conn.params["nonce"]
+
+    with :ok <- check_origin(conn, app_module),
+         {:ok, session_pid} <- fetch_joined_tab_session(tab_id),
+         :ok <- Dialup.UserSessionProcess.finalize_browser_join(session_pid, tab_id, nonce) do
+      session_id = Dialup.UserSessionProcess.session_id(session_pid)
+
+      conn =
+        Plug.Conn.put_resp_cookie(conn, "dialup_session", session_id,
+          http_only: true,
+          same_site: "Lax"
+        )
+
+      send_json(conn, 200, %{"sessionId" => session_id})
+    else
+      {:error, :invalid_finalize} ->
+        send_json(conn, 403, %{"error" => "Invalid browser join finalize request"})
+
+      {:error, :session_not_found} ->
+        send_json(conn, 409, %{"error" => "Joined browser session was not found"})
+
+      {:error, reason} when reason in ["Forbidden origin", "Missing origin"] ->
+        send_resp(conn, 403, reason)
+
+      {:error, reason} ->
+        send_resp(conn, 403, to_string(reason))
+    end
   end
 
   post "/_dialup/agent-handoff" do
@@ -203,7 +270,7 @@ defmodule Dialup.Server do
   end
 
   get _ do
-    conn = Plug.Conn.fetch_cookies(conn)
+    conn = conn |> Plug.Conn.fetch_cookies() |> Plug.Conn.fetch_query_params()
     {conn, _session_id} = ensure_session_id(conn)
     path = conn.request_path
     app_module = conn.private[:dialup_app]
@@ -215,9 +282,7 @@ defmodule Dialup.Server do
           {html, nil, nil}
 
         page_module ->
-          params = app_module.path_params(path)
-          {:ok, assigns} = page_module.mount(params, %{params: params, current_path: path})
-          assigns = Map.put(assigns, :current_path, path)
+          assigns = Dialup.Router.mount_assigns(app_module, path)
 
           html =
             case app_module.dispatch(path, assigns) do
@@ -265,6 +330,22 @@ defmodule Dialup.Server do
   end
 
   defp fetch_live_tab_session(_tab_id, _session_id), do: {:error, :session_not_found}
+
+  defp fetch_joined_tab_session(tab_id) when is_binary(tab_id) and tab_id != "" do
+    case Registry.lookup(Dialup.SessionRegistry, tab_id) do
+      [{pid, _}] ->
+        if Dialup.UserSessionProcess.awaiting_browser_join?(pid) do
+          {:error, :session_not_found}
+        else
+          {:ok, pid}
+        end
+
+      [] ->
+        {:error, :session_not_found}
+    end
+  end
+
+  defp fetch_joined_tab_session(_tab_id), do: {:error, :session_not_found}
 
   defp check_origin(conn, app_module) do
     check_origin =
@@ -338,8 +419,10 @@ defmodule Dialup.Server do
   defp status_text(status), do: "Error #{status}"
 
   defp ensure_session_id(conn) do
-    case conn.cookies["dialup_session"] do
-      nil ->
+    conn = drop_join_param(conn)
+
+    cond do
+      conn.cookies["dialup_session"] == nil ->
         id = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
 
         conn =
@@ -347,8 +430,52 @@ defmodule Dialup.Server do
 
         {conn, id}
 
-      id ->
-        {conn, id}
+      true ->
+        {conn, conn.cookies["dialup_session"]}
+    end
+  end
+
+  defp drop_join_param(%{params: %{"_join" => _}} = conn) do
+    Map.put(conn, :params, Map.delete(conn.params, "_join"))
+  end
+
+  defp drop_join_param(conn), do: conn
+
+  defp resolve_ws_session(conn, join_token) when is_binary(join_token) and join_token != "" do
+    tab_id = conn.params["tab_id"]
+
+    if not is_binary(tab_id) or tab_id == "" do
+      {:error, "Missing tab_id for browser join"}
+    else
+      case Registry.lookup(Dialup.SessionRegistry, {:browser_token, join_token}) do
+        [{pid, _}] ->
+          case Dialup.UserSessionProcess.reserve_browser_join_token(pid, join_token, tab_id) do
+            {:ok, session_id} ->
+              {:ok, session_id, conn}
+
+            {:error, _} ->
+              {:error, "Invalid browser join token"}
+          end
+
+        [] ->
+          {:error, "Invalid browser join token"}
+      end
+    end
+  end
+
+  defp resolve_ws_session(conn, _join_token) do
+    case fetch_dialup_session(conn) do
+      {:ok, session_id} -> {:ok, session_id, conn}
+      error -> error
+    end
+  end
+
+  defp decode_agent_session_path(body) do
+    with {:ok, %{"path" => path}} <- Jason.decode(body),
+         true <- is_binary(path) and path != "" do
+      {:ok, path}
+    else
+      _ -> {:error, :invalid_body}
     end
   end
 
@@ -506,9 +633,7 @@ defmodule Dialup.Server do
         {:error, :not_found}
 
       page_module ->
-        params = app_module.path_params(path)
-        {:ok, assigns} = page_module.mount(params, %{params: params, current_path: path})
-        assigns = Map.put(assigns, :current_path, path)
+        assigns = Dialup.Router.mount_assigns(app_module, path)
         extra = Dialup.Agent.layout_actions(app_module, path)
         {:ok, Dialup.Agent.discovery(page_module, assigns, path, extra)}
     end

@@ -85,3 +85,34 @@ For live typing, follow [Events — ws-change](./events.md):
 
 `site/lib/app/agent_demo/page.ex` — `set_project/3`  
 `site/lib/app/demo/page.ex` — `draft_change/3`
+
+---
+
+## 3. Browser join is not complete when the URL opens
+
+### The mistake
+
+Documentation or UI copy says that opening `browserUrl` (with `?_join=TOKEN`) immediately sets the
+session cookie and attaches the human to the agent session. Agents or integrators skip
+`/_dialup/finalize-join` or omit `tab_id` on the WebSocket upgrade.
+
+### The reality
+
+Browser handoff has one completion point:
+
+1. **Attach** — WebSocket `/ws?tab_id=…&join_token=…` reserves the token and streams live HTML plus
+   `join_finalize_nonce`. No `dialup_session` cookie yet.
+2. **Complete** — `POST /_dialup/finalize-join?tab_id=…&nonce=…` sets the cookie and consumes the
+   token (single-use).
+3. **Sync** — `__reconnect` on the WebSocket (or cookie-only reconnect if the socket dropped after
+   finalize).
+
+`dialup.js` implements this sequence. Custom clients must too.
+
+### How to avoid it
+
+- Do not set the session cookie on the initial GET for join links.
+- Require `tab_id` on join WebSocket upgrades.
+- Treat `issue_browser_url` tokens as consumed only after finalize-join succeeds.
+
+See [Session tokens for HTTP MCP](./agent-handoff.md).

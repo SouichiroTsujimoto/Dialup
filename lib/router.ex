@@ -278,6 +278,36 @@ defmodule Dialup.Router do
     end
   end
 
+  def mount_session(app_module, path) do
+    layouts = app_module.layouts_for(path)
+
+    Enum.reduce(layouts, {%{}, MapSet.new()}, fn layout_mod, {session, keys} ->
+      {:ok, new_session} = layout_mod.mount(session)
+      new_keys = MapSet.new(Map.keys(new_session))
+      {new_session, MapSet.union(keys, new_keys)}
+    end)
+  end
+
+  def mount_assigns(app_module, path) do
+    params = app_module.path_params(path)
+    {session, session_keys} = mount_session(app_module, path)
+
+    page_assigns =
+      case app_module.page_for(path) do
+        nil ->
+          %{}
+
+        page_module ->
+          {:ok, result} = page_module.mount(params, session)
+          Map.drop(result, MapSet.to_list(session_keys))
+      end
+
+    session
+    |> Map.merge(page_assigns)
+    |> Map.put(:params, params)
+    |> Map.put(:current_path, path)
+  end
+
   def render_with_layouts(page_mod, layouts, assigns) do
     page_html = page_mod.render(assigns) |> to_html()
     page_html = wrap_with_scope(page_html, page_mod)
